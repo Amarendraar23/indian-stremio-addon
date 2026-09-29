@@ -11,6 +11,12 @@ A Stremio catalogue and metadata add-on for Indian movies and series, powered by
 
 The server must remain running. The default address is accessible only on this computer. TV/mobile access needs a reachable HTTPS deployment. The Railway setup page is <https://indian-stremio-addon-production.up.railway.app/configure>. Each personal configuration uses its own TMDB credential and cache. Shared access, if enabled, uses the operator's TMDB quota.
 
+## Optional Ko-fi support
+
+Create your account at <https://ko-fi.com> and complete its payout setup. Set `KO_FI_URL=https://ko-fi.com/tech919` in your local `.env` or Railway service variables, then restart or redeploy the service. Docker Compose also passes this variable through.
+
+The configuration page shows an optional support card below the installation section. Its button opens your Ko-fi profile in a new tab without sending the page URL, which may contain a private install configuration. Payments happen on Ko-fi; no payment credentials or third-party widget scripts are added to this app. Leave `KO_FI_URL` blank to hide the card. Only HTTPS Ko-fi profile URLs are accepted.
+
 ## Included
 
 - Indian productions (`with_origin_country=IN`) with original language Assamese, Bengali, Gujarati, Hindi, Kannada, Kashmiri, Malayalam, Marathi, Nepali, Odia, Punjabi, Sanskrit, Sindhi, Tamil, Telugu, or Urdu. The default combines these 16 languages. English and other foreign-language originals are excluded from discovery, search, and metadata.

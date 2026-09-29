@@ -5,6 +5,7 @@ services:
     environment:
       TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
       CONFIG_SECRET: ${CONFIG_SECRET:?Set a permanent random CONFIG_SECRET in .env}
+      KO_FI_URL: ${KO_FI_URL:-}
       HOST: 0.0.0.0
       PORT: "7000"
     ports:
