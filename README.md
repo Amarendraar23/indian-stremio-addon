@@ -65,3 +65,7 @@ Repository: <https://github.com/Amarendraar23/indian-stremio-addon>. License: MI
 The in-app Community catalogue uses <https://stremio.github.io/stremio-publish-addon/index.html>. The separate curated directory is <https://stremio-addons.net>. Follow its [submission rules](https://docs.stremio-addons.net/addons/submission-rules); never submit a configured or personal-key URL. A submission is not an approval or a confirmed listing. Complete live configuration and catalogue checks before submitting.
 
 Release validation (2026-09-29): Railway version 0.2.0 is live with personal keys enabled and no shared credential. A real personal-token test returned 20 titles on each of six shelves, three RRR search matches, and series episode metadata. Stremio community publishing returned HTTP 429 (code 9908); listing is not confirmed. No personal link was submitted.
+
+## Filter by language in Stremio
+
+In Discover, select an India catalogue, open Filters, then use **Genre** to choose an Indian original language. Stremio supplies the Genre label; this add-on uses its options for languages. All includes the languages permitted by your installation. Movie and series list cards and search results append the original language to the title, for example `RRR · Telugu`. IDs and detailed metadata titles stay unchanged. Existing installations need their manifest refreshed to see new filter options.

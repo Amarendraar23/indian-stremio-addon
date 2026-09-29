@@ -15,8 +15,9 @@ const indian = item => item.origin_country?.includes('IN') || item.production_co
 export function createAddon(tmdb, today = () => new Date().toISOString().slice(0, 10)) {
   function manifest(language = 'all') {
     validateLanguage(language);
+    const languageFilter = { name: 'genre', options: language === 'all' ? LANGUAGE_NAMES : [LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(language)]] };
     return {
-      id: `community.indian.tmdb.${language}`, version: '0.2.1',
+      id: `community.indian.tmdb.${language}`, version: '0.3.0',
       logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
       name: `Indian Cinema${language === 'all' ? '' : ` (${language})`}`,
       description: 'Indian movies and series in Indian languages. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
@@ -26,9 +27,9 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
       catalogs: Object.keys(kinds).flatMap(type => [
         ...Object.entries(shelves).map(([id, name]) => ({
           type, id, name: `India · ${name}`, pageSize: 20,
-          extra: [{ name: 'skip' }]
+          extra: [languageFilter, { name: 'skip' }]
         })),
-        { type, id: 'search', name: 'India · Search', extra: [{ name: 'search', isRequired: true }] }
+        { type, id: 'search', name: 'India · Search', extra: [{ name: 'search', isRequired: true }, languageFilter] }
       ])
     };
   }
@@ -53,6 +54,12 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
   async function catalog(type, id, extra = {}, language = 'all') {
     validateLanguage(language);
     if (!Object.hasOwn(kinds, type) || !(Object.hasOwn(shelves, id) || id === 'search')) throw new ServiceError('Catalogue not found.', 404);
+    if (extra.genre) {
+      const selected = INDIAN_LANGUAGES[LANGUAGE_NAMES.indexOf(extra.genre)];
+      if (!selected) throw new ServiceError('Unsupported Indian language filter.', 400);
+      if (language !== 'all' && language !== selected) return { metas: [] };
+      language = selected;
+    }
     const skip = Number(extra.skip ?? 0);
     if (!Number.isSafeInteger(skip) || skip < 0 || skip % 20 !== 0) throw new ServiceError('Invalid catalogue offset.', 400);
     const page = skip / 20 + 1;
@@ -78,7 +85,10 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const unique = [...new Map(rows.map(row => [row.id, row])).values()];
     const full = await Promise.all(unique.map(row => details(type, row.id)));
     return { metas: full.filter(item => !item.adult && indian(item) && INDIAN_LANGUAGES.includes(item.original_language) &&
-      (language === 'all' || item.original_language === language)).map(item => preview(type, item)), cacheMaxAge: 900 };
+      (language === 'all' || item.original_language === language)).map(item => {
+        const result = preview(type, item);
+        return { ...result, name: `${result.name} · ${LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(item.original_language)]}` };
+      }), cacheMaxAge: 900 };
   }
   async function meta(type, id) {
     if (!Object.hasOwn(kinds, type)) throw new ServiceError('Type not found.', 404);

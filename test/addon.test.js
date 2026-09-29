@@ -198,9 +198,37 @@ test('personal configuration validates credentials, isolates users, and produces
   }
   for (const [index, path] of paths.entries()) {
     const response = await fetch(base + path.replace('manifest.json', 'catalog/movie/popular.json'));
-    assert.equal((await response.json()).metas[0].name, index === 0 ? 'First account' : 'Second account');
+    assert.equal((await response.json()).metas[0].name, index === 0 ? 'First account · Hindi' : 'Second account · Hindi');
   }
   assert.ok(seen.includes('a'.repeat(32)) && seen.includes('b'.repeat(32)));
   assert.equal((await fetch(`${base}/c/invalid/all/manifest.json`)).status, 400);
   assert.equal((await submit({ credential: 'x'.repeat(5000) })).status, 413);
+});
+
+
+test('language catalogue filter narrows discovery and labels cards without changing IDs or metadata names', async () => {
+  let query;
+  const addon = createAddon(async (path, params) => {
+    if (path.startsWith('/discover')) { query = params; return { results: [{ id: 1 }] }; }
+    return { ...movie, original_language: 'te', title: 'RRR' };
+  });
+  const shelves = addon.manifest().catalogs;
+  assert.ok(shelves.every(s => s.extra.some(e => e.name === 'genre' && e.options.includes('Telugu') && e.options.length === 16)));
+  const result = await addon.catalog('movie', 'popular', { genre: 'Telugu', skip: '20' });
+  assert.equal(query.with_original_language, 'te');
+  assert.equal(query.page, 2);
+  assert.equal(result.metas[0].name, 'RRR · Telugu');
+  assert.equal(result.metas[0].id, movie.imdb_id);
+  assert.equal((await addon.meta('movie', 'indiantmdb:movie:1')).meta.name, 'RRR');
+  assert.deepEqual((await addon.catalog('movie', 'popular', { genre: 'Hindi' })).metas, []);
+  await assert.rejects(addon.catalog('movie', 'popular', { genre: 'English' }), { status: 400 });
+  assert.deepEqual((await addon.catalog('movie', 'popular', { genre: 'Telugu' }, 'hi')).metas, []);
+  assert.deepEqual(addon.manifest('hi').catalogs[0].extra[0].options, ['Hindi']);
+});
+
+test('series search applies language filter and card labels', async () => {
+  const addon = createAddon(async path => path.startsWith('/search') ? { results: [{ id: 1 }], total_pages: 1 }
+    : { ...movie, name: 'Series', title: undefined, original_language: 'ta' });
+  assert.equal((await addon.catalog('series', 'search', { search: 'Series', genre: 'Tamil' })).metas[0].name, 'Series · Tamil');
+  assert.deepEqual((await addon.catalog('series', 'search', { search: 'Series', genre: 'Telugu' })).metas, []);
 });
