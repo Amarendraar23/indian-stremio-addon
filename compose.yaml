@@ -1,0 +1,16 @@
+services:
+  indian-cinema:
+    build: .
+    image: indian-cinema:0.1.1
+    environment:
+      TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:?Set TMDB_READ_ACCESS_TOKEN in .env}
+      HOST: 0.0.0.0
+      PORT: "7000"
+    ports:
+      - "127.0.0.1:7001:7000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    init: true
