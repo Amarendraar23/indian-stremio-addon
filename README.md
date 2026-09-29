@@ -62,4 +62,6 @@ Name: **Indian Cinema**. Description: **Discover Indian movies and series in 16 
 
 Repository: <https://github.com/Amarendraar23/indian-stremio-addon>. License: MIT.
 
-The in-app Community catalogue uses <https://addons.stremio.com/publish>. The separate curated directory is <https://stremio-addons.net>. Follow its [submission rules](https://docs.stremio-addons.net/addons/submission-rules); never submit a configured or personal-key URL. A submission is not an approval or a confirmed listing. Complete live configuration and catalogue checks before submitting.
+The in-app Community catalogue uses <https://stremio.github.io/stremio-publish-addon/index.html>. The separate curated directory is <https://stremio-addons.net>. Follow its [submission rules](https://docs.stremio-addons.net/addons/submission-rules); never submit a configured or personal-key URL. A submission is not an approval or a confirmed listing. Complete live configuration and catalogue checks before submitting.
+
+Release validation (2026-09-29): Railway version 0.2.0 is live with personal keys enabled and no shared credential. A real personal-token test returned 20 titles on each of six shelves, three RRR search matches, and series episode metadata. Stremio community publishing returned HTTP 429 (code 9908); listing is not confirmed. No personal link was submitted.
