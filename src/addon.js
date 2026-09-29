@@ -2,6 +2,7 @@ import { ServiceError } from './tmdb.js';
 
 // Indian scheduled languages represented in TMDB's ISO 639-1 language list.
 export const INDIAN_LANGUAGES = ['as', 'bn', 'gu', 'hi', 'kn', 'ks', 'ml', 'mr', 'ne', 'or', 'pa', 'sa', 'sd', 'ta', 'te', 'ur'];
+export const LANGUAGE_NAMES = ['Assamese', 'Bengali', 'Gujarati', 'Hindi', 'Kannada', 'Kashmiri', 'Malayalam', 'Marathi', 'Nepali', 'Odia', 'Punjabi', 'Sanskrit', 'Sindhi', 'Tamil', 'Telugu', 'Urdu'];
 function validateLanguage(language) {
   if (language !== 'all' && !INDIAN_LANGUAGES.includes(language)) throw new ServiceError('Unsupported Indian language.', 400);
 }
@@ -15,7 +16,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
   function manifest(language = 'all') {
     validateLanguage(language);
     return {
-      id: `community.indian.tmdb.${language}`, version: '0.1.1',
+      id: `community.indian.tmdb.${language}`, version: '0.2.0',
       name: `Indian Cinema${language === 'all' ? '' : ` (${language})`}`,
       description: 'Indian movies and series in Indian languages. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
       resources: ['catalog', { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'indiantmdb:'] }],

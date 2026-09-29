@@ -135,3 +135,72 @@ test('selector exposes only supported Indian languages and uses the Odia label',
   const addon = createAddon(async () => [{ iso_639_1: 'en', english_name: 'English' }, { iso_639_1: 'hi', english_name: 'Hindi' }, { iso_639_1: 'or', english_name: 'Oriya' }]);
   assert.deepEqual(await addon.languages(), [{ iso_639_1: 'hi', english_name: 'Hindi' }, { iso_639_1: 'or', english_name: 'Odia' }]);
 });
+
+test('TMDB API keys use the documented query parameter without a bearer header', async () => {
+  const tmdb = createTmdb({ apiKey: 'a'.repeat(32), fetcher: async (url, options) => {
+    assert.equal(url.origin, 'https://api.themoviedb.org');
+    assert.equal(url.searchParams.get('api_key'), 'a'.repeat(32));
+    assert.equal(options.headers.Authorization, undefined);
+    return { ok: true, json: async () => [] };
+  } });
+  await tmdb('/configuration/languages');
+});
+
+test('encrypted configuration survives restarts and rejects tampering and a changed secret', async () => {
+  const { createConfigCodec } = await import('../src/config.js');
+  const codec = createConfigCodec('s'.repeat(64));
+  const credential = 'a'.repeat(32);
+  const encoded = codec.seal(credential);
+  assert.equal(encoded.includes(credential), false);
+  assert.equal(createConfigCodec('s'.repeat(64)).open(encoded), credential);
+  assert.throws(() => codec.open('X' + encoded.slice(1)), { status: 400 });
+  assert.throws(() => createConfigCodec('t'.repeat(64)).open(encoded), { status: 400 });
+  assert.throws(() => createConfigCodec().seal(credential), { status: 503 });
+});
+
+test('personal configuration validates credentials, isolates users, and produces installable manifests', async t => {
+  const seen = [];
+  const factory = options => createTmdb({ ...options, fetcher: async (url, request) => {
+    const key = url.searchParams.get('api_key') || request.headers.Authorization;
+    seen.push(key);
+    if (key === 'c'.repeat(32)) return { ok: false, status: 401 };
+    const data = url.pathname.endsWith('/configuration/languages') ? []
+      : url.pathname.includes('/discover/') ? { results: [{ id: 1 }] }
+      : { ...movie, title: key === 'a'.repeat(32) ? 'First account' : 'Second account' };
+    return { ok: true, json: async () => data };
+  } });
+  const server = createServer(createAddon(createTmdb()), { configSecret: 's'.repeat(64), sharedCredential: false, tmdbFactory: factory });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const submit = body => fetch(`${base}/api/configure`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await (await fetch(`${base}/manifest.json`)).json()).behaviorHints.configurationRequired, true);
+  assert.equal((await fetch(`${base}/all/catalog/movie/popular.json`)).status, 503);
+  assert.equal((await fetch(`${base}/languages.json`)).status, 200);
+  assert.equal((await submit({ language: 'all' })).status, 400);
+  assert.equal((await submit({ credential: 'a'.repeat(32), language: 'en' })).status, 400);
+  const rejected = await submit({ credential: 'c'.repeat(32) });
+  assert.equal(rejected.status, 503);
+  assert.equal((await rejected.text()).includes('c'.repeat(32)), false);
+  const paths = [];
+  for (const credential of ['a'.repeat(32), 'b'.repeat(32)]) {
+    const response = await submit({ credential, language: 'hi' });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const { path } = await response.json();
+    assert.equal(path.includes(credential), false);
+    paths.push(path);
+    assert.equal((await (await fetch(base + path)).json()).behaviorHints.configurationRequired, false);
+    const page = await fetch(base + path.replace('manifest.json', 'configure'));
+    assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal((await page.text()).includes(credential), false);
+  }
+  for (const [index, path] of paths.entries()) {
+    const response = await fetch(base + path.replace('manifest.json', 'catalog/movie/popular.json'));
+    assert.equal((await response.json()).metas[0].name, index === 0 ? 'First account' : 'Second account');
+  }
+  assert.ok(seen.includes('a'.repeat(32)) && seen.includes('b'.repeat(32)));
+  assert.equal((await fetch(`${base}/c/invalid/all/manifest.json`)).status, 400);
+  assert.equal((await submit({ credential: 'x'.repeat(5000) })).status, 413);
+});

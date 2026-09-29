@@ -1,13 +1,13 @@
 # ElfHosted handoff
 
-Status: deployment files prepared locally. Podman built an OCI image and all 12 tests passed inside the build. A follow-up Docker-format build failed with a Podman overlay-storage error; standalone container runtime and the Docker health check remain unverified. Public source: https://github.com/Amarendraar23/indian-stremio-addon. No public container image, hosting request, or ElfHosted deployment has been created.
+Status: an ElfHosted inquiry has been sent; acceptance is unconfirmed. Railway successfully built and started version 0.1.1 with all 12 build tests passing. Version 0.2.0 adds personal TMDB credentials; deployment requires a permanent CONFIG_SECRET. Public source: https://github.com/Amarendraar23/indian-stremio-addon.
 
 ## Runtime
 
 - Node.js 24, no npm runtime dependencies; Dockerfile runs the test suite during the build.
 - Non-root UID 1000. No persistent storage or database required; cache is in memory.
 - Listen on `0.0.0.0:7000` inside the container. Terminate HTTPS at the hosting ingress.
-- Set `TMDB_READ_ACCESS_TOKEN` through the host's secret manager at runtime. Never add `.env` to a repository, image, public message, or install URL.
+- Set a permanent random `CONFIG_SECRET` for personal credentials. Optionally set `TMDB_READ_ACCESS_TOKEN` for shared access through the host's secret manager at runtime. Never add `.env` to a repository, image, public message, or install URL.
 - `/health` is process liveness only. Test a real catalogue to validate TMDB connectivity.
 - Setup: `/configure`; all-Indian-language manifest: `/all/manifest.json`.
 - HTTPS install links are derived from the setup page's browser origin. The service expects hosting at the domain root.
@@ -28,7 +28,7 @@ docker compose down
 
 Compose reads the existing `.env` at runtime. Port 7001 avoids the existing development server on port 7000. The build context uses an allowlist and excludes credentials. The runtime image contains only application source and package metadata.
 
-## Hosting request draft — not sent
+## Original hosting request draft (historical)
 
 Hi ElfHosted team,
 
@@ -44,9 +44,9 @@ Thanks!
 
 ## Remaining steps
 
-1. Verify the container build and runtime on a Docker host.
+1. Verify the personal-credential release on the chosen host.
 2. Publish a verified container image if requested by ElfHosted.
-3. Contact ElfHosted through the channel linked by their official documentation. Acceptance and a hosting URL are not yet confirmed.
+3. Await the existing private ElfHosted inquiry. Acceptance and a hosting URL are not yet confirmed.
 4. After acceptance, configure the host secret privately and verify the HTTPS manifest, both media types, language filters, metadata, and Stremio installation.
 
 Official hosting route: https://docs.elfhosted.com/stremio-addons/
