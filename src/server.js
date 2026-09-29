@@ -6,12 +6,13 @@ import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
 import { createConfigCodec, credentialOptions } from './config.js';
 
-const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Indian Cinema · Stremio</title><style>
 body{margin:0;background:#10151c;color:#f0eee8;font:18px/1.6 system-ui}main{max-width:750px;margin:8vh auto;padding:28px}
 h1{font-size:clamp(36px,7vw,60px);line-height:1.1}p{color:#bbc3ce}label{display:block;margin-top:24px}
 select,input,button,a.install{box-sizing:border-box;padding:13px;border-radius:8px;border:1px solid #657283;font:inherit}
 select,input{width:100%;background:#202a37;color:white}button,a.install{display:inline-block;background:#eab56a;color:#17202a;cursor:pointer;margin-top:16px;text-decoration:none}
+.support{margin-top:40px;padding:24px;border:1px solid #394757;border-radius:12px;background:#17202a}.support h2{margin:0;font-size:24px}.support p{margin:10px 0 18px}.support-link{display:inline-block;padding:10px 16px;border:1px solid #eab56a;border-radius:8px;text-decoration:none}.support-link:hover{background:#243142}.support-link:focus-visible{outline:3px solid #f0eee8;outline-offset:4px}
 footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</style>
 <main><div>STREMIO ADD-ON</div><h1>Indian stories.<br>Indian languages.</h1>
 <p>Discover Indian movies and series, with popular, recently released, and highly rated collections. Posters, title details, cast, and episodes come from TMDB.</p>
@@ -25,6 +26,9 @@ footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</st
 <div id="result" hidden><a class="install" id="install">Install in Stremio</a>
 <label for="manifest">Or copy this manifest URL into Stremio</label><input id="manifest" readonly aria-label="Manifest URL"><button id="copy">Copy URL</button>
 </div><p id="status" role="status"></p><p>This add-on supplies catalogues and metadata. Playback depends on your other add-ons. Search checks the first 100 TMDB matches and keeps Indian productions.</p>
+${supportUrl ? `<section class="support" aria-labelledby="support-title"><h2 id="support-title">Help keep this add-on running</h2>
+<p>If you find it useful, you can support hosting and development. Every contribution is optional.</p>
+<a class="support-link" href="${supportUrl}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">☕ Support this project on Ko-fi <span aria-hidden="true">↗</span><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"> (opens in a new tab)</span></a></section>` : ''}
 <footer><h2>Credits</h2><a href="https://www.themoviedb.org"><img width="110" alt="TMDB" src="https://www.themoviedb.org/assets/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg"></a>
 <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p></footer></main>
 <script>
@@ -48,7 +52,12 @@ generate.addEventListener('click',async()=>{
 document.querySelector('#copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(field.value);status.textContent='Manifest URL copied.';}catch{field.select();status.textContent='Select and copy the URL above.';}});
 </script></html>`;
 
-export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb } = {}) {
+export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '' } = {}) {
+  const supportUrl = koFiUrl.trim();
+  if (supportUrl && !/^https:\/\/ko-fi\.com\/[a-z0-9_\-]+\/?$/i.test(supportUrl)) {
+    throw new Error('KO_FI_URL must be an HTTPS Ko-fi profile URL, for example https://ko-fi.com/yourname.');
+  }
+  const configurationPage = page(supportUrl);
   const codec = createConfigCodec(configSecret);
   const clients = new Map();
   const limited = createLimiter();
@@ -116,7 +125,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       let language = 'all';
       if (parts[0] === 'all' || /^[a-z]{2}$/.test(parts[0] || '')) language = parts.shift();
       if (!parts.length || (parts.length === 1 && parts[0] === 'configure')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(page); return;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(configurationPage); return;
       }
       if (personalConfig !== undefined) {
         scopedAddon = personalAddon(codec.open(personalConfig));
@@ -149,6 +158,6 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT || 7000);
   const host = process.env.HOST || '127.0.0.1';
-  const server = createServer(createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN })), { configSecret: process.env.CONFIG_SECRET, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN) });
+  const server = createServer(createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN })), { configSecret: process.env.CONFIG_SECRET, koFiUrl: process.env.KO_FI_URL, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN) });
   server.listen(port, host, () => console.log(`Indian Cinema is listening on ${host}:${port}. Open /configure to install.`));
 }
