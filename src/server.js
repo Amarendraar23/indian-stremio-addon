@@ -4,6 +4,7 @@ const logo = readFileSync(new URL('./logo.png', import.meta.url));
 import { pathToFileURL } from 'node:url';
 import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
+import { discoveryConfig, encodeDiscovery, decodeDiscovery } from './discovery.js';
 import { createConfigCodec, credentialOptions } from './config.js';
 
 const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -11,13 +12,22 @@ const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"
 body{margin:0;background:#10151c;color:#f0eee8;font:18px/1.6 system-ui}main{max-width:750px;margin:8vh auto;padding:28px}
 h1{font-size:clamp(36px,7vw,60px);line-height:1.1}p{color:#bbc3ce}label{display:block;margin-top:24px}
 select,input,button,a.install{box-sizing:border-box;padding:13px;border-radius:8px;border:1px solid #657283;font:inherit}
-select,input{width:100%;background:#202a37;color:white}button,a.install{display:inline-block;background:#eab56a;color:#17202a;cursor:pointer;margin-top:16px;text-decoration:none}
+input[type=checkbox]{width:auto;margin-right:10px}fieldset{border:1px solid #657283;border-radius:8px;margin-top:24px}fieldset label{display:inline-block;margin:6px 16px 6px 0}select,input{width:100%;background:#202a37;color:white}button,a.install{display:inline-block;background:#eab56a;color:#17202a;cursor:pointer;margin-top:16px;text-decoration:none}
 .support{margin-top:40px;padding:24px;border:1px solid #394757;border-radius:12px;background:#17202a}.support h2{margin:0;font-size:24px}.support p{margin:10px 0 18px}.support-link{display:inline-block;padding:10px 16px;border:1px solid #eab56a;border-radius:8px;text-decoration:none}.support-link:hover{background:#243142}.support-link:focus-visible{outline:3px solid #f0eee8;outline-offset:4px}
 footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</style>
 <main><div>STREMIO ADD-ON</div><h1>Indian stories.<br>Indian languages.</h1>
 <p>Discover Indian movies and series, with popular, recently released, and highly rated collections. Posters, title details, cast, and episodes come from TMDB.</p>
-<label for="language">Original language</label><select id="language"><option value="all">All Indian languages · recommended</option></select>
+<fieldset id="language"><legend>Original languages · choose one or more</legend><button type="button" id="all-languages">Select all</button><button type="button" id="clear-languages">Clear selection</button><div id="language-options"></div></fieldset>
 <p>Includes Indian productions in the 16 Indian languages supported by this selector. English and other foreign-language originals are excluded. Choosing a language narrows the catalogue; it does not select dubbed audio.</p>
+<p>Hidden gems are automatic: released titles rated at least 7/10 with 20–500 TMDB votes, sorted by rating. Vote counts are a rough visibility measure, not editorial recommendations. Use “By decade” in Stremio Discover and its Genre selector for decades. Other shelves use Genre for language.</p>
+<h2>Actor/director movie collections</h2>
+<label for="person-query">Find an actor or director by name</label>
+<input id="person-query" maxlength="100" placeholder="Search TMDB people" autocomplete="off">
+<label for="person-role">Collection role</label><select id="person-role"><option value="actor">Starring</option><option value="director">Directed by</option></select>
+<button id="find-person" disabled>Find person</button><div id="person-results" aria-live="polite"></div>
+<label for="people">Selected collections · optional, up to four</label>
+<input id="people" placeholder="actor:31, director:5655" maxlength="120" autocomplete="off">
+<p>Search by name after entering your credential below, then select the matching person to add a collection. You can also enter role:TMDB-person-ID pairs separated by commas. Find the ID in a person's <a href="https://www.themoviedb.org/person" target="_blank" rel="noreferrer">TMDB page</a> URL. Names are checked when you generate the link. Each becomes a named movie shelf. Director shelves require an actual Director credit; series person collections are not supported.</p>
 <label for="credential">Your TMDB API key or API Read Access Token</label>
 <input id="credential" type="password" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="Paste your TMDB credential">
 <p id="credential-help">Use your own TMDB credential. <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">Get it from TMDB API settings</a>.</p>
@@ -34,18 +44,34 @@ ${supportUrl ? `<section class="support" aria-labelledby="support-title"><h2 id=
 <script>
 const language=document.querySelector('#language'), field=document.querySelector('#manifest'), status=document.querySelector('#status'), credential=document.querySelector('#credential'), generate=document.querySelector('#generate'), result=document.querySelector('#result');
 const names=${JSON.stringify(LANGUAGE_NAMES)}, codes=${JSON.stringify(INDIAN_LANGUAGES)};
-for(const [index,code] of codes.entries()){const option=document.createElement('option');option.value=code;option.textContent=names[index];language.append(option);}
-const selected=location.pathname.split('/').at(-2);if([...language.options].some(o=>o.value===selected))language.value=selected;
-function invalidate(){result.hidden=true;field.value='';document.querySelector('#install').removeAttribute('href');status.textContent='';}
+for(const [index,code] of codes.entries()){const label=document.createElement('label'), input=document.createElement('input');input.type='checkbox';input.value=code;input.checked=true;label.append(input, names[index]);document.querySelector('#language-options').append(label);}
+const boxes=[...language.querySelectorAll('input')], people=document.querySelector('#people');
+const pathParts=location.pathname.split('/').filter(Boolean), selected=pathParts.at(-2);
+if(codes.includes(selected))boxes.forEach(b=>b.checked=b.value===selected);
+if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
+document.querySelector('#all-languages').onclick=()=>{boxes.forEach(b=>b.checked=true);invalidate();};
+document.querySelector('#clear-languages').onclick=()=>{boxes.forEach(b=>b.checked=false);invalidate();};
+people.addEventListener('input',invalidate);
+let revision=0;
+const findPerson=document.querySelector('#find-person');
+findPerson.addEventListener('click',async()=>{
+ const container=document.querySelector('#person-results');container.replaceChildren();findPerson.disabled=true;
+ try{const response=await fetch('/api/people',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),personQuery:document.querySelector('#person-query').value.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error);
+ if(!data.people.length)container.textContent='No matching people found.';
+ for(const person of data.people){const button=document.createElement('button');button.textContent=person.name+' · '+(person.knownFor || 'TMDB person')+' · '+person.id;button.onclick=()=>{const entries=people.value.trim()?people.value.split(',').map(p=>p.trim()):[];const entry=document.querySelector('#person-role').value+':'+person.id;if(entries.includes(entry))return;if(entries.length>=4){status.textContent='Choose up to four collections.';return;}people.value=[...entries,entry].join(', ');invalidate();button.textContent='Added '+person.name;};container.append(button);}
+ }catch(error){container.textContent=error.message;}finally{findPerson.disabled=false;}
+});
+function invalidate(){revision++;result.hidden=true;field.value='';document.querySelector('#install').removeAttribute('href');status.textContent='';}
 language.addEventListener('change',invalidate);credential.addEventListener('input',invalidate);
 fetch('/configuration.json').then(r=>r.json()).then(config=>{
- generate.disabled=!config.personalKeys&&!config.sharedCredential;
+ generate.disabled=!config.personalKeys&&!config.sharedCredential;findPerson.disabled=generate.disabled;
  if(config.sharedCredential)document.querySelector('#credential-help').append(' Leave blank to use the shared server credential.');
  if(!config.personalKeys){credential.disabled=true;status.textContent='Personal keys are not enabled on this host yet.';}
 }).catch(()=>{status.textContent='Could not load configuration. Please reload.';});
 generate.addEventListener('click',async()=>{
- invalidate();generate.disabled=true;status.textContent='Checking configuration…';
- try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),language:language.value})});const data=await response.json();if(!response.ok)throw new Error(data.error);
+ invalidate();const requestRevision=revision;generate.disabled=true;status.textContent='Checking configuration…';
+ try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),languages:boxes.filter(b=>b.checked).map(b=>b.value),people:people.value.trim()?people.value.split(',').map(entry=>{const pair=entry.trim().split(':');if(pair.length!==2)throw new Error('Use role:person-ID pairs.');const [role,id]=pair;return {role,id:Number(id),name:'Pending'};}):[]})});const data=await response.json();if(!response.ok)throw new Error(data.error);
+ if(requestRevision!==revision){status.textContent='Settings changed. Generate a new link.';return;}
  field.value=location.origin+data.path;document.querySelector('#install').href=field.value.replace(/^https?:/,'stremio:');result.hidden=false;credential.value='';status.textContent='Ready to install. Keep your personal link private.';
  }catch(error){status.textContent=error.message;}finally{generate.disabled=false;}
 });
@@ -71,7 +97,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
     }
     return client;
   }
-  async function configure(req) {
+  async function configure(req, personSearch = false) {
     if (!req.headers['content-type']?.startsWith('application/json')) throw new ServiceError('Send JSON configuration.', 415);
     const minute = Math.floor(Date.now() / 60000);
     if (minute !== configurationWindow) { configurationWindow = minute; configurationCount = 0; }
@@ -86,16 +112,19 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       let data;
       try { data = JSON.parse(body); } catch { throw new ServiceError('Invalid configuration.', 400); }
       if (!data || typeof data !== 'object') throw new ServiceError('Invalid configuration.', 400);
-      const language = data.language || 'all';
-      addon.manifest(language); // Validate against the same language allowlist used for catalogues.
-      if (!data.credential) {
-        if (!sharedCredential) throw new ServiceError('Enter your own TMDB API key or read-access token.', 400);
-        await addon.languages();
-        return { path: `/${language}/manifest.json` };
-      }
-      const encoded = codec.seal(data.credential);
-      await personalAddon(data.credential).languages(); // Validate upstream before issuing an install link.
-      return { path: `/c/${encoded}/${language}/manifest.json` };
+      if (personSearch && (typeof data.personQuery !== 'string' || !data.personQuery.trim() || data.personQuery.length > 100)) throw new ServiceError('Enter a person name (up to 100 characters).', 400);
+      const preferences = discoveryConfig({ languages: data.languages ?? discoveryConfig(data.language || 'all').languages, people: data.people });
+      const scoped = data.credential ? personalAddon(data.credential) : addon;
+      if (!data.credential && !sharedCredential) throw new ServiceError('Enter your own TMDB API key or read-access token.', 400);
+      const encoded = data.credential ? codec.seal(data.credential) : null;
+      if (personSearch) return { people: await scoped.searchPeople(data.personQuery.trim()) };
+      await scoped.languages();
+      for (const person of preferences.people) person.name = await scoped.person(person.id);
+      const legacy = data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
+      const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences)}`;
+      const path = `${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
+      if (path.length > 3800) throw new ServiceError('Install link too long. Select fewer collections or use a TMDB API key.', 400);
+      return { path };
     } finally { configurationActive--; }
   }
   return http.createServer(async (req, res) => {
@@ -109,6 +138,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
     try {
       if (req.url.length > 4096) throw new ServiceError('URL too long.', 414);
       const url = new URL(req.url, 'http://localhost');
+      if (req.method === 'POST' && url.pathname === '/api/people') { json(200, await configure(req, true)); return; }
       if (req.method === 'POST' && url.pathname === '/api/configure') { json(200, await configure(req)); return; }
       if (!['GET', 'HEAD'].includes(req.method)) { json(405, { error: 'Method not allowed.' }); return; }
       if (url.pathname === '/logo.png') {
@@ -124,6 +154,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       }
       let language = 'all';
       if (parts[0] === 'all' || /^[a-z]{2}$/.test(parts[0] || '')) language = parts.shift();
+      if (parts[0] === 'd') { parts.shift(); language = decodeDiscovery(parts.shift() || ''); }
       if (!parts.length || (parts.length === 1 && parts[0] === 'configure')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(configurationPage); return;
       }
