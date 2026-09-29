@@ -109,7 +109,7 @@ test('HTTP manifest, CORS, configuration, encoded search, and errors', async t =
   const manifest = await fetch(`${base}/all/manifest.json`);
   assert.equal(manifest.headers.get('access-control-allow-origin'), '*');
   const body = await manifest.json();
-  assert.equal(body.catalogs.length, 8);
+  assert.equal(body.catalogs.length, 12);
   assert.deepEqual(body.types, ['movie', 'series']);
   assert.ok((await (await fetch(`${base}/configure`)).text()).includes('Indian languages'));
   await fetch(`${base}/ta/catalog/movie/search/search=A%26B.json`);
@@ -213,7 +213,7 @@ test('language catalogue filter narrows discovery and labels cards without chang
     return { ...movie, original_language: 'te', title: 'RRR' };
   });
   const shelves = addon.manifest().catalogs;
-  assert.ok(shelves.every(s => s.extra.some(e => e.name === 'genre' && e.options.includes('Telugu') && e.options.length === 16)));
+  assert.ok(shelves.filter(s => s.id !== 'decades').every(s => s.extra.some(e => e.name === 'genre' && e.options.includes('Telugu') && e.options.length === 16)));
   const result = await addon.catalog('movie', 'popular', { genre: 'Telugu', skip: '20' });
   assert.equal(query.with_original_language, 'te');
   assert.equal(query.page, 2);
@@ -231,4 +231,122 @@ test('series search applies language filter and card labels', async () => {
     : { ...movie, name: 'Series', title: undefined, original_language: 'ta' });
   assert.equal((await addon.catalog('series', 'search', { search: 'Series', genre: 'Tamil' })).metas[0].name, 'Series · Tamil');
   assert.deepEqual((await addon.catalog('series', 'search', { search: 'Series', genre: 'Telugu' })).metas, []);
+});
+
+test('multiple languages are canonical, restrict discovery/search, and reject invalid settings', async () => {
+  const { discoveryConfig, encodeDiscovery, decodeDiscovery } = await import('../src/discovery.js');
+  const config = discoveryConfig({ languages: ['ta', 'hi', 'ta'] });
+  assert.deepEqual(config.languages, ['hi', 'ta']);
+  assert.deepEqual(decodeDiscovery(encodeDiscovery(config)), config);
+  for (const languages of [[], ['en'], 'hi', [null]]) assert.throws(() => discoveryConfig({ languages }), { status: 400 });
+  assert.throws(() => decodeDiscovery('bad'), { status: 400 });
+  let query;
+  const addon = createAddon(async (path, params) => {
+    if (path.startsWith('/discover') || path.startsWith('/search')) { query = params; return { results: [{ id: 1 }, { id: 2 }, { id: 3 }] }; }
+    const id = Number(path.split('/').at(-1));
+    return { ...movie, id, original_language: ['hi', 'ta', 'te'][id - 1] };
+  });
+  assert.equal((await addon.catalog('movie', 'popular', {}, config)).metas.length, 2);
+  assert.equal(query.with_original_language, 'hi|ta');
+  assert.equal((await addon.catalog('movie', 'search', { search: 'Film' }, config)).metas.length, 2);
+  assert.deepEqual(await addon.catalog('movie', 'popular', { genre: 'Telugu' }, config), { metas: [] });
+  assert.deepEqual(addon.manifest(config).catalogs[0].extra[0].options, ['Hindi', 'Tamil']);
+});
+
+test('hidden gems enforce inclusive vote boundaries, rating, release, origin and language', async () => {
+  let params;
+  const fixtures = [
+    { vote_count: 20 }, { vote_count: 500 }, { vote_count: 19 }, { vote_count: 501 },
+    { vote_average: 6.9 }, { release_date: '2027-01-01' }, { release_date: '' },
+    { adult: true }, { original_language: 'en' }, { origin_country: ['US'], production_countries: [] }
+  ];
+  const addon = createAddon(async (path, query) => {
+    if (path.startsWith('/discover')) { params = query; return { results: fixtures.map((_, id) => ({ id })) }; }
+    return { ...movie, vote_average: 7, vote_count: 100, ...fixtures[Number(path.split('/').at(-1))] };
+  }, () => '2026-09-29');
+  assert.equal((await addon.catalog('movie', 'gems')).metas.length, 2);
+  assert.equal(params['vote_count.gte'], 20);
+  assert.equal(params['vote_count.lte'], 500);
+  assert.equal(params['vote_average.gte'], 7);
+  assert.equal(params.sort_by, 'vote_average.desc');
+});
+
+test('decades map to movie release or TV first-air dates and cap current decade at today', async () => {
+  const calls = [];
+  const addon = createAddon(async (path, params) => { calls.push({ path, params }); return { results: [] }; }, () => '2026-09-29');
+  assert.deepEqual(await addon.catalog('movie', 'decades'), { metas: [] });
+  await assert.rejects(addon.catalog('movie', 'decades', { genre: '2030s' }), { status: 400 });
+  assert.equal(calls.length, 0);
+  await addon.catalog('movie', 'decades', { genre: '1990s', skip: '20' }, 'hi');
+  assert.equal(calls[0].params['primary_release_date.gte'], '1990-01-01');
+  assert.equal(calls[0].params['primary_release_date.lte'], '1999-12-31');
+  assert.equal(calls[0].params.page, 2);
+  await addon.catalog('series', 'decades', { genre: '2020s' });
+  assert.equal(calls[1].params['first_air_date.gte'], '2020-01-01');
+  assert.equal(calls[1].params['first_air_date.lte'], '2026-09-29');
+});
+
+test('people collections verify exact acting/directing role and cannot be requested outside config', async () => {
+  const config = { languages: ['hi'], people: [{ role: 'actor', id: 10, name: 'Actor' }, { role: 'director', id: 20, name: 'Director' }] };
+  let query;
+  const addon = createAddon(async (path, params) => {
+    if (path.startsWith('/discover')) { query = params; return { results: [{ id: 1 }, { id: 2 }] }; }
+    return { ...movie, credits: { cast: [{ id: 10 }], crew: [{ id: 20, job: path.endsWith('/1') ? 'Director' : 'Producer' }] } };
+  });
+  assert.equal(addon.manifest(config).catalogs.filter(c => c.id === 'actor-10').length, 1);
+  assert.equal((await addon.catalog('movie', 'actor-10', {}, config)).metas.length, 2);
+  assert.equal(query.with_cast, 10);
+  assert.equal((await addon.catalog('movie', 'director-20', {}, config)).metas.length, 1);
+  assert.equal(query.with_crew, 20);
+  await assert.rejects(addon.catalog('series', 'actor-10', {}, config), { status: 404 });
+  await assert.rejects(addon.catalog('movie', 'actor-10'), { status: 404 });
+});
+
+test('new HTTP preferences round-trip with shared and encrypted personal installs; legacy links still work', async t => {
+  const tmdb = async path => path === '/configuration/languages' ? [] : path === '/search/person' ? { results: [{ id: 10, name: 'Resolved Person' }] } : path.startsWith('/person/') ? { name: 'Resolved Person' }
+    : path.startsWith('/discover') ? { results: [{ id: 1 }] } : { ...movie, credits: { cast: [{ id: 10 }] } };
+  const server = createServer(createAddon(tmdb), { configSecret: 's'.repeat(64), tmdbFactory: () => tmdb });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const submit = body => fetch(`${base}/api/configure`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  for (const credential of ['', 'a'.repeat(32)]) {
+    const response = await submit({ credential, languages: ['ta', 'hi'], people: [{ role: 'actor', id: 10, name: 'Untrusted name' }] });
+    assert.equal(response.status, 200);
+    const { path } = await response.json();
+    assert.ok(path.includes('/d/'));
+    assert.ok(!credential || !path.includes(credential));
+    const manifest = await (await fetch(base + path)).json();
+    assert.ok(manifest.catalogs.some(c => c.name === 'India · Starring Resolved Person'));
+    assert.deepEqual(manifest.catalogs[0].extra[0].options, ['Hindi', 'Tamil']);
+    const result = await (await fetch(base + path.replace('manifest.json', 'catalog/movie/actor-10.json'))).json();
+    assert.equal(result.metas.length, 1);
+    assert.equal((await fetch(base + path.replace('manifest.json', 'configure'))).status, 200);
+  }
+  assert.equal((await submit({ languages: [], people: [] })).status, 400);
+  assert.equal((await submit({ languages: ['hi'], people: Array(5).fill({ role: 'actor', id: 10, name: 'x' }) })).status, 400);
+  const peopleResponse = await fetch(`${base}/api/people`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personQuery: 'Name' }) });
+  assert.equal(peopleResponse.status, 200);
+  assert.equal((await peopleResponse.json()).people[0].name, 'Resolved Person');
+  const invalidSearch = await fetch(`${base}/api/people`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personQuery: '' }) });
+  assert.equal(invalidSearch.status, 400);
+  assert.equal((await fetch(`${base}/d/bad/manifest.json`)).status, 400);
+  assert.equal((await fetch(`${base}/hi/manifest.json`)).status, 200);
+});
+
+test('person search is bounded and excludes adult results', async () => {
+  let calls = 0;
+  const addon = createAddon(async (path, params) => {
+    calls++;
+    assert.equal(path, '/search/person');
+    assert.equal(params.page, 1);
+    assert.equal(params.include_adult, false);
+    return { results: [{ id: 99, adult: true }, ...Array.from({ length: 20 }, (_, id) => ({ id, name: 'Person', known_for: [{ title: 'Film' }] }))] };
+  });
+  const results = await addon.searchPeople('Name');
+  assert.equal(calls, 1);
+  assert.equal(results.length, 10);
+  assert.ok(!results.some(p => p.id === 99));
+  assert.equal(results[0].knownFor, 'Film');
 });
