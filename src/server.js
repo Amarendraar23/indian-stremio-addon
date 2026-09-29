@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
+const logo = readFileSync(new URL('./logo.png', import.meta.url));
 import { pathToFileURL } from 'node:url';
 import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
@@ -100,6 +102,9 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       const url = new URL(req.url, 'http://localhost');
       if (req.method === 'POST' && url.pathname === '/api/configure') { json(200, await configure(req)); return; }
       if (!['GET', 'HEAD'].includes(req.method)) { json(405, { error: 'Method not allowed.' }); return; }
+      if (url.pathname === '/logo.png') {
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }); res.end(logo); return;
+      }
       let parts;
       try { parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent); }
       catch { throw new ServiceError('Malformed URL.', 400); }

@@ -1,7 +1,7 @@
 services:
   indian-cinema:
     build: .
-    image: indian-cinema:0.2.0
+    image: indian-cinema:0.2.1
     environment:
       TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
       CONFIG_SECRET: ${CONFIG_SECRET:?Set a permanent random CONFIG_SECRET in .env}

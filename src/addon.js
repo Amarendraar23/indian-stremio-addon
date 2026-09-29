@@ -16,7 +16,8 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
   function manifest(language = 'all') {
     validateLanguage(language);
     return {
-      id: `community.indian.tmdb.${language}`, version: '0.2.0',
+      id: `community.indian.tmdb.${language}`, version: '0.2.1',
+      logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
       name: `Indian Cinema${language === 'all' ? '' : ` (${language})`}`,
       description: 'Indian movies and series in Indian languages. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
       resources: ['catalog', { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'indiantmdb:'] }],
