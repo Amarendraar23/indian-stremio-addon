@@ -77,7 +77,7 @@ Release validation (2026-09-29): Railway version 0.2.0 is live with personal key
 In Discover, select an India catalogue (except By decade), open Filters, then use **Genre** to choose an Indian original language. Stremio supplies the Genre label; this add-on uses its options for languages. All includes the languages permitted by your installation. Movie and series list cards and search results append the original language to the title, for example `RRR · Telugu`. IDs and detailed metadata titles stay unchanged. Existing installations need their manifest refreshed to see new filter options.
 
 
-## Discovery features (0.4.0, local implementation)
+## Discovery features (0.4.0)
 
 - **Multiple languages:** check one or more original languages on `/configure`. All shelves and search use that selection; language filters can narrow it further. Metadata retains the existing full supported-language scope to resolve IDs from other add-ons. Empty selections are rejected. Audio/dubs are not selected.
 - **Hidden gems:** movies and series released by today (UTC), with TMDB rating **at least 7/10** and **20–500 votes inclusive**, ordered by descending rating. This is an automatic rule, not human curation or proof that a title is obscure. Lower vote counts approximate visibility and can bias results toward recent titles or smaller audiences; TMDB data changes over time.
@@ -90,6 +90,17 @@ New preferences use `/d/<encoded-preferences>/manifest.json`, optionally after t
 
 Official references checked for this implementation: [Stremio manifest selectors](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/manifest.md), [TMDB movie discovery](https://developer.themoviedb.org/reference/discover-movie), [TV discovery](https://developer.themoviedb.org/reference/discover-tv), [person search](https://developer.themoviedb.org/reference/search-person), and [person details](https://developer.themoviedb.org/reference/person-details). The existing pipe-separated original-language query is retained; the current TMDB reference does not explicitly document OR syntax for that particular field. A read-only live check on 2026-09-29 returned 20 movie results containing both Hindi and Tamil and no other original languages for `hi|ta`. Detail filtering also enforces the selected set; this one page does not establish completeness across all language combinations.
 
-Before release, use a private test installation to verify a two-language selection, both hidden-gem shelves, an older/current decade, and actor/director collections in the target Stremio clients. Confirm live TMDB results, page advancement and new manifest visibility. Automated tests use fixtures and do not prove live result completeness. These changes have not been deployed; the earlier Railway validation above describes version 0.2.0 only.
+Before release, use a private test installation to verify a two-language selection, both hidden-gem shelves, an older/current decade, and actor/director collections in the target Stremio clients. Confirm live TMDB results, page advancement and new manifest visibility. Automated tests use fixtures and do not prove live result completeness. The earlier Railway validation above describes version 0.2.0; see the 0.4.0 production acceptance below.
 
-Local verification: 23 Node behavior/HTTP tests passed, plus a headless Chrome fixture check of desktop/mobile setup, person search, generated manifest, restored preferences, empty-selection errors and browser script errors. The live check above made one discovery request; the new shelves have not yet been accepted inside Stremio.
+Local verification: 23 Node behavior/HTTP tests passed, plus a headless Chrome fixture check of desktop/mobile setup, person search, generated manifest, restored preferences, empty-selection errors and browser script errors. These implementation checks preceded the production acceptance below.
+
+
+### Production acceptance — 2026-09-29
+
+Version 0.4.0 was deployed to the existing Railway production service through [PR #1](https://github.com/Amarendraar23/indian-stremio-addon/pull/1), merge commit `a4a4c32ff15c0d17784293cd42c2ec07720a6643`, deployment `66c82197-c816-4391-b262-02bbd1cbcf3d`. All six uploaded files matched the tested local files before merge, and 23 behavior/HTTP tests passed.
+
+Live production checks with a private Hindi/Tamil configuration returned 20 hidden-gem movies, 20 hidden-gem series, 20 movies from the 1990s, 20 series from the 2020s, 20 Shah Rukh Khan movies, and 15 Mani Ratnam movies. A second popular page returned 20 titles. Every returned catalogue item passed the selected-language check; decade results passed year checks. Counts are a point-in-time observation, not a completeness promise.
+
+Stremio Web visibly rendered both hidden-gem shelves, the 1990s movie and 2020s series catalogues, actor and director collections, and the two-language selector. Selecting Tamil narrowed the rendered movie cards to Tamil. The existing encrypted all-language link loaded version 0.4.0; its installation was refreshed, and the temporary Hindi/Tamil installation was removed. One all-language Indian Cinema installation remains. Person collections remain optional configuration choices. No private install links or credentials are included here.
+
+Native desktop, mobile and TV clients and playback were not tested in this release acceptance. This add-on continues to provide catalogues and metadata only.
