@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ServiceError } from './tmdb.js';
 
 export function credentialOptions(value) {
@@ -37,6 +37,22 @@ export function createConfigCodec(secret) {
         credentialOptions(credential);
         return credential;
       } catch { throw new ServiceError('This install link is invalid. Configure the add-on again.', 400); }
+    }
+  };
+}
+
+// Discovery preferences travel in the install URL as readable JSON. Collection names are looked up
+// on this server during setup; the signature shows a URL's names came from here and were not edited.
+// Without CONFIG_SECRET a per-process key is used, so names fall back to IDs after a restart.
+export function createPreferenceSigner(secret) {
+  const key = typeof secret === 'string' && secret.length >= 32
+    ? createHmac('sha256', secret).update('indian-cinema discovery preferences').digest() : randomBytes(32);
+  const mac = payload => createHmac('sha256', key).update(payload).digest().subarray(0, 16);
+  return {
+    sign: payload => mac(payload).toString('base64url'),
+    verify(payload, signature) {
+      if (typeof signature !== 'string' || !/^[A-Za-z0-9_-]{22}$/.test(signature)) return false;
+      return timingSafeEqual(mac(payload), Buffer.from(signature, 'base64url'));
     }
   };
 }

@@ -335,6 +335,34 @@ test('new HTTP preferences round-trip with shared and encrypted personal install
   assert.equal((await fetch(`${base}/hi/manifest.json`)).status, 200);
 });
 
+test('collection names in install links are shown only when this server signed them', async t => {
+  const tmdb = async path => path === '/configuration/languages' ? [] : path.startsWith('/person/') ? { name: 'Resolved Person' }
+    : path.startsWith('/discover') ? { results: [{ id: 1 }] } : { ...movie, credits: { cast: [{ id: 10 }] } };
+  const start = async secret => {
+    const server = createServer(createAddon(tmdb), { configSecret: secret });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+    return `http://127.0.0.1:${server.address().port}`;
+  };
+  const base = await start('s'.repeat(64)), other = await start('t'.repeat(64));
+  const names = async url => (await (await fetch(url)).json()).catalogs.filter(c => c.id === 'actor-10').map(c => c.name);
+  const { path } = await (await fetch(`${base}/api/configure`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ languages: ['hi'], people: [{ role: 'actor', id: 10, name: 'Pending' }] }) })).json();
+  assert.deepEqual(await names(base + path), ['India · Starring Resolved Person']);
+  assert.deepEqual(await names(other + path), ['India · Starring TMDB person 10']);
+
+  const blob = config => Buffer.from(JSON.stringify(config)).toString('base64url');
+  const forged = blob({ languages: ['hi'], people: [{ role: 'actor', id: 10, name: 'Visit example.test' }] });
+  const signature = path.split('/d/')[1].split('/')[0].split('.')[1];
+  for (const d of [forged, `${forged}.${signature}`, `${forged}.${'A'.repeat(22)}`]) {
+    assert.deepEqual(await names(`${base}/d/${d}/manifest.json`), ['India · Starring TMDB person 10']);
+  }
+  assert.equal((await (await fetch(`${base}/d/${forged}/catalog/movie/actor-10.json`)).json()).metas.length, 1);
+  for (const d of [`${forged}.x.y`, `.${signature}`]) assert.equal((await fetch(`${base}/d/${d}/manifest.json`)).status, 400);
+  assert.ok((await (await fetch(base + path.replace('manifest.json', 'configure'))).text()).includes(".split('.')[0]"));
+});
+
 test('person search is bounded and excludes adult results', async () => {
   let calls = 0;
   const addon = createAddon(async (path, params) => {
