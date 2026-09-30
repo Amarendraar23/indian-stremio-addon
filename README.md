@@ -74,7 +74,15 @@ Release validation (2026-09-29): Railway version 0.2.0 is live with personal key
 
 ## Filter by language in Stremio
 
-In Discover, select an India catalogue (except By decade), open Filters, then use **Genre** to choose an Indian original language. Stremio supplies the Genre label; this add-on uses its options for languages. All includes the languages permitted by your installation. Movie and series list cards and search results append the original language to the title, for example `RRR · Telugu`. IDs and detailed metadata titles stay unchanged. Existing installations need their manifest refreshed to see new filter options.
+In Discover, select an India catalogue (except By decade or By year), open Filters, then use **Genre** to choose an Indian original language. Stremio supplies the Genre label; this add-on uses its options for languages. All includes the languages permitted by your installation. Movie and series list cards and search results append the original language to the title, for example `RRR · Telugu`. IDs and detailed metadata titles stay unchanged. Existing installations need their manifest refreshed to see new filter options.
+
+## Filter by year in Stremio (0.5.0)
+
+In Discover, select **India · By year** under Movies or Series, then use **Genre** to choose a year. Years run from the current UTC year back to 1910, newest first. Select a year to load results; this catalogue has no default home shelf.
+
+Movies use TMDB primary release dates; series use their first-air dates, not individual episode dates. Results are ordered by popularity and use your installation's selected original languages. The current year includes only titles released by today (UTC). There is no separate language selector on the year catalogue; choose languages on the setup page. Pages request up to 20 titles with the existing 500-page limit, and detail filtering can produce shorter pages without backfill. Availability depends on TMDB records.
+
+Refresh or reinstall the add-on after deploying this version to see both new catalogues. Existing install URLs remain supported. Automated checks use TMDB fixtures; live TMDB and native Stremio client acceptance remain required before release.
 
 
 ## Discovery features (0.4.0)

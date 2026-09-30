@@ -109,7 +109,7 @@ test('HTTP manifest, CORS, configuration, encoded search, and errors', async t =
   const manifest = await fetch(`${base}/all/manifest.json`);
   assert.equal(manifest.headers.get('access-control-allow-origin'), '*');
   const body = await manifest.json();
-  assert.equal(body.catalogs.length, 12);
+  assert.equal(body.catalogs.length, 14);
   assert.deepEqual(body.types, ['movie', 'series']);
   assert.ok((await (await fetch(`${base}/configure`)).text()).includes('Indian languages'));
   await fetch(`${base}/ta/catalog/movie/search/search=A%26B.json`);
@@ -213,7 +213,7 @@ test('language catalogue filter narrows discovery and labels cards without chang
     return { ...movie, original_language: 'te', title: 'RRR' };
   });
   const shelves = addon.manifest().catalogs;
-  assert.ok(shelves.filter(s => s.id !== 'decades').every(s => s.extra.some(e => e.name === 'genre' && e.options.includes('Telugu') && e.options.length === 16)));
+  assert.ok(shelves.filter(s => !['decades', 'years'].includes(s.id)).every(s => s.extra.some(e => e.name === 'genre' && e.options.includes('Telugu') && e.options.length === 16)));
   const result = await addon.catalog('movie', 'popular', { genre: 'Telugu', skip: '20' });
   assert.equal(query.with_original_language, 'te');
   assert.equal(query.page, 2);
@@ -284,6 +284,95 @@ test('decades map to movie release or TV first-air dates and cap current decade 
   await addon.catalog('series', 'decades', { genre: '2020s' });
   assert.equal(calls[1].params['first_air_date.gte'], '2020-01-01');
   assert.equal(calls[1].params['first_air_date.lte'], '2026-09-29');
+});
+
+test('year selectors advertise descending years for both media types', () => {
+  const addon = createAddon(() => { throw new Error('Unexpected request'); }, () => '2026-09-29');
+  const catalogs = addon.manifest('hi').catalogs.filter(c => c.id === 'years');
+  assert.deepEqual(catalogs.map(c => c.type), ['movie', 'series']);
+  for (const catalog of catalogs) {
+    assert.equal(catalog.name, 'India · By year');
+    const selector = catalog.extra.find(e => e.name === 'genre');
+    assert.equal(selector.isRequired, true);
+    assert.equal(selector.options.length, 117);
+    assert.deepEqual(selector.options.slice(0, 2), ['2026', '2025']);
+    assert.equal(selector.options.at(-1), '1910');
+    assert.ok(catalog.extra.some(e => e.name === 'skip'));
+  }
+});
+
+test('year filtering validates selection before requesting TMDB and respects page bounds', async () => {
+  const addon = createAddon(() => { throw new Error('Unexpected request'); }, () => '2026-09-29');
+  assert.deepEqual(await addon.catalog('movie', 'years'), { metas: [] });
+  for (const genre of ['', '1909', '2027', '2024s', '2024.0', 'Hindi', ' 2024', 2024, null]) {
+    await assert.rejects(addon.catalog('movie', 'years', { genre }), { status: 400 });
+  }
+  await assert.rejects(addon.catalog('movie', 'years', { genre: '2024', skip: '1' }), { status: 400 });
+  assert.deepEqual(await addon.catalog('movie', 'years', { genre: '2024', skip: '10000' }), { metas: [] });
+});
+
+test('year discovery uses media-specific dates, inclusive boundaries, configured languages and pagination', async () => {
+  for (const type of ['movie', 'series']) {
+    const calls = [];
+    const dateField = type === 'movie' ? 'release_date' : 'first_air_date';
+    const dates = ['2024-01-01', '2024-12-31', '2023-12-31', '2025-01-01', '', null];
+    const fixtures = dates.map((value, id) => ({ ...movie, id, release_date: '2024-01-01', [dateField]: value }));
+    fixtures.push({ ...fixtures[0], id: 6, original_language: 'te' }, { ...fixtures[0], id: 7, adult: true },
+      { ...fixtures[0], id: 8, origin_country: ['US'], production_countries: [] });
+    const addon = createAddon(async (path, params) => {
+      calls.push({ path, params });
+      return path.startsWith('/discover') ? { results: fixtures.map(({ id }) => ({ id })) } : fixtures[Number(path.split('/').at(-1))];
+    }, () => '2026-09-29');
+    const result = await addon.catalog(type, 'years', { genre: '2024', skip: '20' }, { languages: ['hi', 'ta'] });
+    assert.equal(result.metas.length, 2);
+    const { path, params } = calls[0];
+    const prefix = type === 'movie' ? 'primary_release_date' : 'first_air_date';
+    assert.equal(path, type === 'movie' ? '/discover/movie' : '/discover/tv');
+    assert.equal(params[`${prefix}.gte`], '2024-01-01');
+    assert.equal(params[`${prefix}.lte`], '2024-12-31');
+    assert.equal(params.page, 2);
+    assert.equal(params.with_original_language, 'hi|ta');
+    assert.equal(params.with_origin_country, 'IN');
+    assert.equal(params.sort_by, 'popularity.desc');
+  }
+});
+
+test('current-year catalogues exclude future releases and missing dates for movies and series', async () => {
+  for (const type of ['movie', 'series']) {
+    const dateField = type === 'movie' ? 'release_date' : 'first_air_date';
+    const dates = ['2026-01-01', '2026-09-29', '2026-09-30', '2026-12-31', ''];
+    let query;
+    const addon = createAddon(async (path, params) => {
+      if (path.startsWith('/discover')) { query = params; return { results: dates.map((_, id) => ({ id })) }; }
+      return { ...movie, [dateField]: dates[Number(path.split('/').at(-1))] };
+    }, () => '2026-09-29');
+    assert.equal((await addon.catalog(type, 'years', { genre: '2026' })).metas.length, 2);
+    assert.equal(query[type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte'], '2026-09-29');
+  }
+});
+
+test('year catalogues work through legacy and configured HTTP routes', async t => {
+  const { encodeDiscovery } = await import('../src/discovery.js');
+  let query;
+  const addon = createAddon(async (path, params) => {
+    if (path.startsWith('/discover')) { query = params; return { results: [{ id: 1 }] }; }
+    return movie;
+  }, () => '2026-09-29');
+  const server = createServer(addon);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const prefix of ['/all', `/d/${encodeDiscovery({ languages: ['hi', 'ta'] })}`]) {
+    const response = await fetch(`${base}${prefix}/catalog/movie/years/genre=2024&skip=20.json`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).metas.length, 1);
+    assert.equal(query.page, 2);
+    assert.equal(query['primary_release_date.gte'], '2024-01-01');
+  }
+  assert.equal(query.with_original_language, 'hi|ta');
+  assert.equal((await fetch(`${base}/all/catalog/movie/years/genre=bad.json`)).status, 400);
+  assert.deepEqual(await (await fetch(`${base}/all/catalog/movie/years.json`)).json(), { metas: [] });
 });
 
 test('people collections verify exact acting/directing role and cannot be requested outside config', async () => {

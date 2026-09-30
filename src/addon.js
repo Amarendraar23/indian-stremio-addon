@@ -13,15 +13,16 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const config = discoveryConfig(language);
     const key = config.languages.length === 16 ? 'all' : config.languages.join(',');
     const languageFilter = { name: 'genre', options: config.languages.map(l => LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(l)]) };
+    const years = Array.from({ length: Number(today().slice(0, 4)) - 1910 + 1 }, (_, i) => String(Number(today().slice(0, 4)) - i));
     return {
-      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.4.0',
+      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.5.0',
       stremioAddonsConfig: {
         issuer: 'https://stremio-addons.net',
         signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..29Z7WuiwGRXCSH0gpRid2Q.m6xIX3W44s0wA1IYGi4_TszhIA9o6LziBjSu_CadgCcHXSZOyUQKqpyS8i57IXqvwYhSdaC2bbn_AximTC4YXYyz1-nZwbqbWE9Ko9UouROjkayZbplQGG9YjLRJrfb4.1jtRv2pgK4QVe8ceD6YHSA'
       },
       logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
       name: `Indian Cinema${key === 'all' ? '' : ` (${key})`}`,
-      description: 'Indian movies and series: popular, recent, highly rated, automatic hidden gems, decades and optional actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
+      description: 'Indian movies and series: popular, recent, highly rated, automatic hidden gems, years, decades and optional actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
       resources: ['catalog', { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'indiantmdb:'] }],
       types: ['movie', 'series'],
       behaviorHints: { configurable: true, configurationRequired: false },
@@ -31,6 +32,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
           extra: [languageFilter, { name: 'skip' }]
         })),
         { type, id: 'decades', name: 'India · By decade', pageSize: 20, extra: [{ name: 'genre', options: DECADES, isRequired: true }, { name: 'skip' }] },
+        { type, id: 'years', name: 'India · By year', pageSize: 20, extra: [{ name: 'genre', options: years, isRequired: true }, { name: 'skip' }] },
         ...(type === 'movie' ? config.people.map(p => ({ type, id: `${p.role}-${p.id}`, name: `India · ${p.role === 'actor' ? 'Starring' : 'Directed by'} ${p.name}`, pageSize: 20, extra: [languageFilter, { name: 'skip' }] })) : []),
         { type, id: 'search', name: 'India · Search', extra: [{ name: 'search', isRequired: true }, languageFilter] }
       ])
@@ -59,10 +61,15 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     let languages = config.languages;
     const person = config.people.find(p => `${p.role}-${p.id}` === id);
     const decade = id === 'decades' ? extra.genre : undefined;
+    const year = id === 'years' ? extra.genre : undefined;
+    const currentDate = today();
+    if (year !== undefined && (typeof year !== 'string' || !/^\d{4}$/.test(year) || Number(year) < 1910 || Number(year) > Number(currentDate.slice(0, 4)))) throw new ServiceError('Unsupported year.', 400);
+    const periodStart = year ? `${year}-01-01` : decade ? `${parseInt(decade)}-01-01` : undefined;
+    const periodEnd = [year ? `${year}-12-31` : decade ? `${parseInt(decade) + 9}-12-31` : currentDate, currentDate].sort()[0];
     if (decade && !DECADES.includes(decade)) throw new ServiceError('Unsupported decade.', 400);
-    if (!Object.hasOwn(kinds, type) || !(Object.hasOwn(shelves, id) || id === 'search' || id === 'decades' || (type === 'movie' && person))) throw new ServiceError('Catalogue not found.', 404);
-    if (id === 'decades' && !decade) return { metas: [] };
-    if (extra.genre && id !== 'decades') {
+    if (!Object.hasOwn(kinds, type) || !(Object.hasOwn(shelves, id) || id === 'search' || id === 'decades' || id === 'years' || (type === 'movie' && person))) throw new ServiceError('Catalogue not found.', 404);
+    if ((id === 'decades' && !decade) || (id === 'years' && !year)) return { metas: [] };
+    if (extra.genre && id !== 'decades' && id !== 'years') {
       const selected = INDIAN_LANGUAGES[LANGUAGE_NAMES.indexOf(extra.genre)];
       if (!selected) throw new ServiceError('Unsupported Indian language filter.', 400);
       if (!languages.includes(selected)) return { metas: [] };
@@ -90,8 +97,8 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
         'vote_average.gte': id === 'gems' ? 7 : undefined,
         with_cast: person?.role === 'actor' ? person.id : undefined,
         with_crew: person?.role === 'director' ? person.id : undefined,
-        [type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte']: decade ? `${parseInt(decade)}-01-01` : undefined,
-        [type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte']: decade ? [`${parseInt(decade) + 9}-12-31`, today()].sort()[0] : today()
+        [type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte']: periodStart,
+        [type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte']: periodEnd
       };
       rows = ((await tmdb(`/discover/${kinds[type]}`, params)).results || []).slice(0, 20);
     }
@@ -100,7 +107,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     return { metas: full.filter(item => !item.adult && indian(item) && INDIAN_LANGUAGES.includes(item.original_language) &&
       languages.includes(item.original_language) &&
       (!person || (person.role === 'actor' ? item.credits?.cast?.some(c => c.id === person.id) : item.credits?.crew?.some(c => c.id === person.id && c.job === 'Director'))) &&
-      (!decade || ((item.release_date || item.first_air_date || '') >= `${parseInt(decade)}-01-01` && (item.release_date || item.first_air_date || '') <= [`${parseInt(decade) + 9}-12-31`, today()].sort()[0])) &&
+      (!periodStart || ((type === 'movie' ? item.release_date : item.first_air_date) >= periodStart && (type === 'movie' ? item.release_date : item.first_air_date) <= periodEnd)) &&
       (id !== 'gems' || (item.vote_average >= 7 && item.vote_count >= 20 && item.vote_count <= 500 && Boolean(item.release_date || item.first_air_date) && (item.release_date || item.first_air_date) <= today()))).map(item => {
         const result = preview(type, item);
         return { ...result, name: `${result.name} · ${LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(item.original_language)]}` };
