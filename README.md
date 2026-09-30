@@ -129,3 +129,13 @@ Official contracts: [list types](https://docs.mdblist.com/docs/list_types), [API
 Local verification: Node regression tests cover old configurations and MDBList selection, encrypted credentials, access failures, type mapping, filtered paging, duplicate suppression, cache expiry/isolation and series metadata. A headless Chrome fixture check covers source switching, media-type resolution, catalogue selections, generated/restored configuration, mobile overflow and browser script errors. These use fake credentials and provider fixtures. Version 0.6.0 has not been deployed. Subsequent authenticated checks are recorded below.
 
 Release validation: 50 Node tests passed. Authenticated MDBList movie and series lists passed catalogue pagination, language filtering and metadata checks. Native Stremio acceptance is separate from API validation.
+
+## Coming soon and upcoming (0.7.0)
+
+Movies and series each have one optional **Coming soon / Upcoming** TMDB shelf. It includes all known future release dates, starting tomorrow (UTC), nearest release first. Coming soon and upcoming are the same catalogue.
+
+Movies use primary release dates; series use first-air dates, so these shelves show new series premieres rather than new seasons or episodes of existing shows. Both media types use ascending date order, the selected Indian original languages, Indian-origin checks, and adult filtering. No minimum vote count is required. Undated titles are excluded. TMDB dates can change and do not guarantee local theatrical, streaming, or playback availability. Each page checks up to 20 upstream titles without backfill.
+
+The setup page includes separate movie and TV checkboxes for this catalogue, including when MDBList is selected. Existing links with explicit catalogue selections keep those selections: reopen configuration, enable the new shelves, and generate/install a replacement link after deployment. Legacy links without explicit selections include them when the manifest refreshes.
+
+Date filters follow the official [TMDB movie discovery](https://developer.themoviedb.org/reference/discover-movie) and [TV discovery](https://developer.themoviedb.org/reference/discover-tv) contracts. Local fixture tests cover date boundaries across New Year, both media types, language/country/adult filtering, paging, selection persistence and HTTP routes. Deployment and live TMDB/Stremio acceptance are not included in this change.
