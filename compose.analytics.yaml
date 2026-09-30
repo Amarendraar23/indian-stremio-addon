@@ -1,0 +1,10 @@
+# Optional local Docker overlay: docker compose -f compose.yaml -f compose.analytics.yaml up --build -d
+services:
+  indian-cinema:
+    environment:
+      ANALYTICS_DB_PATH: /app/data/activity.sqlite
+      ANALYTICS_ADMIN_PASSWORD: ${ANALYTICS_ADMIN_PASSWORD:?Set a separate strong admin password}
+    volumes:
+      - activity-data:/app/data
+volumes:
+  activity-data:

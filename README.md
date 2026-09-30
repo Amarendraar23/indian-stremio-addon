@@ -1,6 +1,6 @@
 # Indian Cinema for Stremio
 
-A Stremio catalogue and metadata add-on for Indian movies and series, powered by TMDB. Uses Node.js 22+ and the Stremio HTTP protocol directly, with no third-party runtime dependencies.
+A Stremio catalogue and metadata add-on for Indian movies and series, powered by TMDB. Uses Node.js 24+ and the Stremio HTTP protocol directly, with no third-party runtime dependencies.
 
 ## Start
 
@@ -56,7 +56,7 @@ See [ELFHOSTED.md](ELFHOSTED.md) for the earlier container preparation and hosti
 - Install paths carry AES-256-GCM encrypted credentials. These are still bearer capabilities: anyone possessing an install URL can use that TMDB credential through the add-on. Do not share personal URLs. Stremio may sync them and hosting infrastructure may retain request paths. Revoke compromised credentials at TMDB. There is no individual-link revocation database.
 - The app does not log request paths, credentials, or upstream response bodies. Configuration responses use `no-store` and `no-referrer`. Disable request-body logging in any proxy. The host can decrypt credentials; encryption does not hide them from the operator.
 - Personal client caches are bounded to 50 credentials and 100 responses per client. All personal clients share a four-request upstream concurrency limit and a bounded queue. Setup and person search together are limited to 30 attempts per minute per process and four concurrent attempts. These are availability safeguards, not a distributed abuse-control service; public traffic and hosting spend need monitoring.
-- To configure an installed personal link again, enter the credential again; the page never reveals a stored credential. There is no account or database.
+- To configure an installed personal link again, enter the credential again; the page never reveals a stored credential. No user account is required.
 
 ## Community listing
 

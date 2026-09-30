@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createAnalytics, dashboard, installationPattern } from './analytics.js';
 import { readFileSync } from 'node:fs';
 const logo = readFileSync(new URL('./logo.png', import.meta.url));
 import { pathToFileURL } from 'node:url';
@@ -78,7 +79,7 @@ generate.addEventListener('click',async()=>{
 document.querySelector('#copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(field.value);status.textContent='Manifest URL copied.';}catch{field.select();status.textContent='Select and copy the URL above.';}});
 </script></html>`;
 
-export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '' } = {}) {
+export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '', analytics = null } = {}) {
   const supportUrl = koFiUrl.trim();
   if (supportUrl && !/^https:\/\/ko-fi\.com\/[a-z0-9_\-]+\/?$/i.test(supportUrl)) {
     throw new Error('KO_FI_URL must be an HTTPS Ko-fi profile URL, for example https://ko-fi.com/yourname.');
@@ -122,7 +123,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       for (const person of preferences.people) person.name = await scoped.person(person.id);
       const legacy = data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
       const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences)}`;
-      const path = `${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
+      const path = `${analytics ? `/i/${analytics.issue()}` : ''}${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
       if (path.length > 3800) throw new ServiceError('Install link too long. Select fewer collections or use a TMDB API key.', 400);
       return { path };
     } finally { configurationActive--; }
@@ -134,10 +135,26 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cache-Control', 'no-store');
     const json = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
+    let installationId, dataRequest = false;
+    res.on('finish', () => { if (analytics && dataRequest && req.method === 'GET') analytics.record(installationId, res.statusCode >= 200 && res.statusCode < 300); });
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     try {
       if (req.url.length > 4096) throw new ServiceError('URL too long.', 414);
       const url = new URL(req.url, 'http://localhost');
+      if (url.pathname === '/admin/analytics' || url.pathname === '/admin/analytics.json') {
+        res.removeHeader('Access-Control-Allow-Origin');
+        res.setHeader('X-Frame-Options', 'DENY');
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        if (!analytics) { json(404, { error: 'Not found.' }); return; }
+        if (!analytics.authorized(req.headers.authorization)) {
+          res.setHeader('WWW-Authenticate', 'Basic realm="Indian Cinema admin", charset="UTF-8"');
+          json(401, { error: 'Authentication required.' }); return;
+        }
+        if (req.method !== 'GET') { json(405, { error: 'Method not allowed.' }); return; }
+        if (url.pathname.endsWith('.json')) json(200, analytics.snapshot());
+        else { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(dashboard); }
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/people') { json(200, await configure(req, true)); return; }
       if (req.method === 'POST' && url.pathname === '/api/configure') { json(200, await configure(req)); return; }
       if (!['GET', 'HEAD'].includes(req.method)) { json(405, { error: 'Method not allowed.' }); return; }
@@ -147,6 +164,10 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       let parts;
       try { parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent); }
       catch { throw new ServiceError('Malformed URL.', 400); }
+      if (parts[0] === 'i') {
+        parts.shift(); installationId = parts.shift();
+        if (!installationPattern.test(installationId || '')) throw new ServiceError('Invalid installation link.', 400);
+      }
       let scopedAddon = addon, configured = sharedCredential, personalConfig;
       if (parts[0] === 'c') {
         parts.shift();
@@ -166,6 +187,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       if (parts.length === 1 && parts[0] === 'manifest.json') { json(200, { ...scopedAddon.manifest(language), behaviorHints: { configurable: true, configurationRequired: !configured } }); return; }
       if (parts.length === 1 && parts[0] === 'configuration.json') { json(200, { personalKeys: codec.enabled, sharedCredential }); return; }
       if (parts.length === 1 && parts[0] === 'languages.json') { json(200, INDIAN_LANGUAGES.map((code, index) => ({ iso_639_1: code, english_name: LANGUAGE_NAMES[index] }))); return; }
+      dataRequest = (parts[0] === 'catalog' && [3,4].includes(parts.length) || parts[0] === 'meta' && parts.length === 3) && parts.at(-1).endsWith('.json');
       if (!configured) throw new ServiceError('Configure the add-on with your own TMDB credential first.', 503);
       if (parts[0] === 'catalog' && [3, 4].includes(parts.length) && parts.at(-1).endsWith('.json')) {
         const type = parts[1];
@@ -186,9 +208,13 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function startServer() {
   const port = Number(process.env.PORT || 7000);
   const host = process.env.HOST || '127.0.0.1';
-  const server = createServer(createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN })), { configSecret: process.env.CONFIG_SECRET, koFiUrl: process.env.KO_FI_URL, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN) });
+  const analytics = process.env.ANALYTICS_DB_PATH ? createAnalytics({ path: process.env.ANALYTICS_DB_PATH, password: process.env.ANALYTICS_ADMIN_PASSWORD }) : null;
+  const server = createServer(createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN })), { analytics, configSecret: process.env.CONFIG_SECRET, koFiUrl: process.env.KO_FI_URL, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN) });
   server.listen(port, host, () => console.log(`Indian Cinema is listening on ${host}:${port}. Open /configure to install.`));
+  return server;
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) startServer();
