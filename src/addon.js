@@ -15,18 +15,18 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const languageFilter = { name: 'genre', options: config.languages.map(l => LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(l)]) };
     const years = Array.from({ length: Number(today().slice(0, 4)) - 1910 + 1 }, (_, i) => String(Number(today().slice(0, 4)) - i));
     return {
-      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.5.1',
+      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.6.0',
       stremioAddonsConfig: {
         issuer: 'https://stremio-addons.net',
         signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..29Z7WuiwGRXCSH0gpRid2Q.m6xIX3W44s0wA1IYGi4_TszhIA9o6LziBjSu_CadgCcHXSZOyUQKqpyS8i57IXqvwYhSdaC2bbn_AximTC4YXYyz1-nZwbqbWE9Ko9UouROjkayZbplQGG9YjLRJrfb4.1jtRv2pgK4QVe8ceD6YHSA'
       },
       logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
       name: `Indian Cinema${key === 'all' ? '' : ` (${key})`}`,
-      description: 'Indian movies and series: popular, recent, highly rated, automatic hidden gems, years, decades and optional actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
+      description: 'Indian movies and series: TMDB discovery, optional MDBList saved lists, hidden gems, years, decades and actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
       resources: ['catalog', { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'indiantmdb:'] }],
       types: ['movie', 'series'],
       behaviorHints: { configurable: true, configurationRequired: false },
-      catalogs: Object.keys(kinds).flatMap(type => [
+      catalogs: [...(config.lists || []).flatMap(l => l.types.map(type => ({ type, id: `mdb-${l.id}`, name: `India · MDBList · ${l.name}`, pageSize: 20, extra: [languageFilter, { name: 'skip' }] }))).filter(c => config.catalogues.includes(`${c.type}:${c.id}`)), ...Object.keys(kinds).flatMap(type => [
         ...Object.entries(shelves).map(([id, name]) => ({
           type, id, name: `India · ${name}`, pageSize: 20,
           extra: [languageFilter, { name: 'skip' }]
@@ -35,7 +35,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
         { type, id: 'years', name: 'India · By year', pageSize: 20, extra: [{ name: 'genre', options: years, isRequired: true }, { name: 'skip' }] },
         ...(type === 'movie' ? config.people.map(p => ({ type, id: `${p.role}-${p.id}`, name: `India · ${p.role === 'actor' ? 'Starring' : 'Directed by'} ${p.name}`, pageSize: 20, extra: [languageFilter, { name: 'skip' }] })) : []),
         { type, id: 'search', name: 'India · Search', extra: [{ name: 'search', isRequired: true }, languageFilter] }
-      ]).filter(c => config.catalogues.includes(`${c.type}:${c.id}`) || (c.type === 'movie' && config.people.some(p => `${p.role}-${p.id}` === c.id)))
+      ]).filter(c => config.catalogues.includes(`${c.type}:${c.id}`) || (c.type === 'movie' && config.people.some(p => `${p.role}-${p.id}` === c.id))).map(c => config.source === 'mdblist' ? { ...c, name: c.name.replace('India · ', 'India · TMDB · ') } : c)]
     };
   }
   async function details(type, id) {
@@ -142,7 +142,23 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     }
     return { meta: result, cacheMaxAge: 900 };
   }
-  return { manifest, catalog, meta, searchPeople: async query => {
+  async function listItem(type, row, languages) {
+    let id = row?.ids?.tmdb;
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      const imdb = row?.ids?.imdb || row?.imdb_id;
+      if (!/^tt\d+$/.test(imdb || '')) return null;
+      const found = await tmdb(`/find/${imdb}`, { external_source: 'imdb_id' });
+      id = found[type === 'movie' ? 'movie_results' : 'tv_results']?.[0]?.id;
+      if (!id) return null;
+    }
+    let item;
+    try { item = await details(type, id); }
+    catch (error) { if (error.status === 404) return null; throw error; }
+    if (item.adult || !indian(item) || !languages.includes(item.original_language)) return null;
+    const result = preview(type, item);
+    return { ...result, name: `${result.name} · ${LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(item.original_language)]}` };
+  }
+  return { manifest, catalog, meta, listItem, searchPeople: async query => {
     const result = await tmdb('/search/person', { query, include_adult: false, page: 1, language: 'en-US' });
     return (result.results || []).filter(p => !p.adult).slice(0, 10).map(p => ({ id: p.id, name: p.name, knownFor: (p.known_for || []).map(t => t.title || t.name).filter(Boolean).slice(0, 2).join(', ') }));
   }, person: async id => {
