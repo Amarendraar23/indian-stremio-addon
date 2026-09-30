@@ -6,8 +6,9 @@ import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
 import { discoveryConfig, encodeDiscovery, decodeDiscovery } from './discovery.js';
 import { createConfigCodec, credentialOptions } from './config.js';
+import { settingsFromEnv, DEFAULT_TMDB_BASE_URL } from './settings.js';
 
-const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+const page = (supportUrl, searchMatches) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Indian Cinema · Stremio</title><style>
 body{margin:0;background:#10151c;color:#f0eee8;font:18px/1.6 system-ui}main{max-width:750px;margin:8vh auto;padding:28px}
 h1{font-size:clamp(36px,7vw,60px);line-height:1.1}p{color:#bbc3ce}label{display:block;margin-top:24px}
@@ -35,7 +36,7 @@ footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</st
 <button id="generate" disabled>Generate install link</button>
 <div id="result" hidden><a class="install" id="install">Install in Stremio</a>
 <label for="manifest">Or copy this manifest URL into Stremio</label><input id="manifest" readonly aria-label="Manifest URL"><button id="copy">Copy URL</button>
-</div><p id="status" role="status"></p><p>This add-on supplies catalogues and metadata. Playback depends on your other add-ons. Search checks the first 100 TMDB matches and keeps Indian productions.</p>
+</div><p id="status" role="status"></p><p>This add-on supplies catalogues and metadata. Playback depends on your other add-ons. Search checks the first ${searchMatches} TMDB matches and keeps Indian productions.</p>
 ${supportUrl ? `<section class="support" aria-labelledby="support-title"><h2 id="support-title">Help keep this add-on running</h2>
 <p>If you find it useful, you can support hosting and development. Every contribution is optional.</p>
 <a class="support-link" href="${supportUrl}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">☕ Support this project on Ko-fi <span aria-hidden="true">↗</span><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"> (opens in a new tab)</span></a></section>` : ''}
@@ -78,21 +79,25 @@ generate.addEventListener('click',async()=>{
 document.querySelector('#copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(field.value);status.textContent='Manifest URL copied.';}catch{field.select();status.textContent='Select and copy the URL above.';}});
 </script></html>`;
 
-export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '' } = {}) {
+export function createServer(addon, {
+  configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '',
+  limited = createLimiter(), tmdbBaseUrl = DEFAULT_TMDB_BASE_URL, addonOptions = {},
+  personalCacheEntries = 100, personalClientLimit = 50,
+  setupRateLimit = 30, setupConcurrency = 4, requestTimeoutMs = 30000
+} = {}) {
   const supportUrl = koFiUrl.trim();
   if (supportUrl && !/^https:\/\/ko-fi\.com\/[a-z0-9_\-]+\/?$/i.test(supportUrl)) {
     throw new Error('KO_FI_URL must be an HTTPS Ko-fi profile URL, for example https://ko-fi.com/yourname.');
   }
-  const configurationPage = page(supportUrl);
+  const configurationPage = page(supportUrl, (addonOptions.searchPages ?? 5) * 20);
   const codec = createConfigCodec(configSecret);
   const clients = new Map();
-  const limited = createLimiter();
   let configurationWindow = 0, configurationCount = 0, configurationActive = 0;
   function personalAddon(credential) {
     let client = clients.get(credential);
     if (!client) {
-      if (clients.size >= 50) clients.delete(clients.keys().next().value);
-      client = createAddon(tmdbFactory({ ...credentialOptions(credential), maxCacheEntries: 100, limited }));
+      if (clients.size >= personalClientLimit) clients.delete(clients.keys().next().value);
+      client = createAddon(tmdbFactory({ ...credentialOptions(credential), baseUrl: tmdbBaseUrl, maxCacheEntries: personalCacheEntries, limited }), undefined, addonOptions);
       clients.set(credential, client);
     }
     return client;
@@ -101,14 +106,16 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
     if (!req.headers['content-type']?.startsWith('application/json')) throw new ServiceError('Send JSON configuration.', 415);
     const minute = Math.floor(Date.now() / 60000);
     if (minute !== configurationWindow) { configurationWindow = minute; configurationCount = 0; }
-    if (++configurationCount > 30 || configurationActive >= 4) throw new ServiceError('Too many setup requests. Try again in a minute.', 429);
+    if (setupRateLimit && ++configurationCount > setupRateLimit) throw new ServiceError('Too many setup requests. Try again in a minute.', 429);
+    // Read the whole body before taking a setup slot, so slow uploads cannot hold every slot.
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk.toString();
+      if (Buffer.byteLength(body) > 4096) throw new ServiceError('Configuration too large.', 413);
+    }
+    if (configurationActive >= setupConcurrency) throw new ServiceError('Too many setup requests. Try again in a minute.', 429);
     configurationActive++;
     try {
-      let body = '';
-      for await (const chunk of req) {
-        body += chunk.toString();
-        if (Buffer.byteLength(body) > 4096) throw new ServiceError('Configuration too large.', 413);
-      }
       let data;
       try { data = JSON.parse(body); } catch { throw new ServiceError('Invalid configuration.', 400); }
       if (!data || typeof data !== 'object') throw new ServiceError('Invalid configuration.', 400);
@@ -127,7 +134,8 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       return { path };
     } finally { configurationActive--; }
   }
-  return http.createServer(async (req, res) => {
+  // Node only checks request timeouts on this interval (30 s by default), so check every second.
+  const server = http.createServer({ requestTimeout: requestTimeoutMs, connectionsCheckingInterval: 1000 }, async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -184,11 +192,22 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       json(error instanceof ServiceError ? error.status : 500, { error: error instanceof ServiceError ? error.message : 'The add-on could not complete this request.' });
     }
   });
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT || 7000);
   const host = process.env.HOST || '127.0.0.1';
-  const server = createServer(createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN })), { configSecret: process.env.CONFIG_SECRET, koFiUrl: process.env.KO_FI_URL, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN) });
+  const settings = settingsFromEnv();
+  // The shared credential and personal credentials keep separate limiters, as before.
+  const limiter = () => createLimiter({ concurrency: settings.tmdbConcurrency, queueLimit: settings.tmdbQueueLimit });
+  const addonOptions = { logoUrl: settings.logoUrl, searchPages: settings.searchPages };
+  const addon = createAddon(createTmdb({ token: process.env.TMDB_READ_ACCESS_TOKEN, baseUrl: settings.tmdbBaseUrl, maxCacheEntries: settings.sharedCacheEntries, limited: limiter() }), undefined, addonOptions);
+  const server = createServer(addon, {
+    configSecret: process.env.CONFIG_SECRET, koFiUrl: process.env.KO_FI_URL, sharedCredential: Boolean(process.env.TMDB_READ_ACCESS_TOKEN),
+    limited: limiter(), tmdbBaseUrl: settings.tmdbBaseUrl, addonOptions,
+    personalCacheEntries: settings.personalCacheEntries, personalClientLimit: settings.personalClientLimit,
+    setupRateLimit: settings.setupRateLimit, setupConcurrency: settings.setupConcurrency, requestTimeoutMs: settings.requestTimeoutMs
+  });
   server.listen(port, host, () => console.log(`Indian Cinema is listening on ${host}:${port}. Open /configure to install.`));
 }

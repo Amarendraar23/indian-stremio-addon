@@ -1,25 +1,27 @@
+import { DEFAULT_TMDB_BASE_URL } from './settings.js';
+
 export class ServiceError extends Error {
   constructor(message, status = 502) { super(message); this.status = status; }
 }
 
-export function createLimiter() {
+export function createLimiter({ concurrency = 4, queueLimit = 500 } = {}) {
   let active = 0;
   const queue = [];
   return async function limited(fn) {
-    if (queue.length >= 500) throw new ServiceError('The add-on is busy. Please try again shortly.', 503);
-    if (active >= 4) await new Promise(resolve => queue.push(resolve));
+    if (active >= concurrency && queue.length >= queueLimit) throw new ServiceError('The add-on is busy. Please try again shortly.', 503);
+    if (active >= concurrency) await new Promise(resolve => queue.push(resolve));
     else active++;
     try { return await fn(); }
     finally { if (queue.length) queue.shift()(); else active--; }
   };
 }
 
-export function createTmdb({ token, apiKey, fetcher = fetch, now = Date.now, maxCacheEntries = 1000, limited = createLimiter() } = {}) {
+export function createTmdb({ token, apiKey, baseUrl = DEFAULT_TMDB_BASE_URL, fetcher = fetch, now = Date.now, maxCacheEntries = 1000, limited = createLimiter() } = {}) {
   const cache = new Map();
   const pending = new Map();
   return async function tmdb(path, params = {}) {
     if (!token && !apiKey) throw new ServiceError('Configure the add-on with your TMDB API key or read-access token.', 503);
-    const url = new URL(`https://api.themoviedb.org/3${path}`);
+    const url = new URL(`${baseUrl}${path}`);
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
     }

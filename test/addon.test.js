@@ -350,3 +350,71 @@ test('person search is bounded and excludes adult results', async () => {
   assert.ok(!results.some(p => p.id === 99));
   assert.equal(results[0].knownFor, 'Film');
 });
+
+test('operator settings default to earlier behaviour and reject invalid values', async () => {
+  const { settingsFromEnv, DEFAULT_TMDB_BASE_URL, DEFAULT_LOGO_URL } = await import('../src/settings.js');
+  const defaults = settingsFromEnv({});
+  assert.equal(defaults.tmdbBaseUrl, DEFAULT_TMDB_BASE_URL);
+  assert.equal(defaults.logoUrl, DEFAULT_LOGO_URL);
+  assert.deepEqual([defaults.tmdbConcurrency, defaults.tmdbQueueLimit, defaults.searchPages, defaults.setupRateLimit, defaults.setupConcurrency], [4, 500, 5, 30, 4]);
+  const custom = settingsFromEnv({ TMDB_BASE_URL: 'http://cache.internal/tmdb/3/', TMDB_CONCURRENCY: '32', SEARCH_MAX_PAGES: '1', SETUP_RATE_LIMIT: '0', LOGO_URL: 'https://addon.example/logo.png' });
+  assert.equal(custom.tmdbBaseUrl, 'http://cache.internal/tmdb/3');
+  assert.deepEqual([custom.tmdbConcurrency, custom.searchPages, custom.setupRateLimit, custom.logoUrl], [32, 1, 0, 'https://addon.example/logo.png']);
+  for (const env of [{ TMDB_CONCURRENCY: '0' }, { TMDB_CONCURRENCY: '2.5' }, { SEARCH_MAX_PAGES: '6' }, { TMDB_BASE_URL: 'ftp://x' }, { TMDB_BASE_URL: 'https://x/3?api_key=1' }, { TMDB_BASE_URL: 'https://user:pass@x/3' }, { LOGO_URL: 'logo.png' }]) {
+    assert.throws(() => settingsFromEnv(env), Error);
+  }
+});
+
+test('TMDB base URL is configurable and still carries API keys', async () => {
+  const tmdb = createTmdb({ apiKey: 'a'.repeat(32), baseUrl: 'http://cache.internal/tmdb/3', fetcher: async url => {
+    assert.equal(url.origin + url.pathname, 'http://cache.internal/tmdb/3/movie/1');
+    assert.equal(url.searchParams.get('api_key'), 'a'.repeat(32));
+    return { ok: true, json: async () => ({}) };
+  } });
+  await tmdb('/movie/1');
+});
+
+test('limiter honours configured concurrency and queue size', async () => {
+  const { createLimiter } = await import('../src/tmdb.js');
+  const limited = createLimiter({ concurrency: 2, queueLimit: 0 });
+  let release, active = 0, peak = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const job = () => limited(async () => { peak = Math.max(peak, ++active); await gate; active--; });
+  const running = [job(), job()];
+  // A queued job would wait for the gate forever, so race it against a timer.
+  const overflow = await Promise.race([job().then(() => 'queued', error => error.status), new Promise(resolve => setTimeout(resolve, 200, 'queued'))]);
+  assert.equal(overflow, 503);
+  release();
+  await Promise.all(running);
+  assert.equal(peak, 2);
+});
+
+test('search page count and logo URL are configurable', async () => {
+  const searched = [];
+  const addon = createAddon(async (path, params) => {
+    if (path.startsWith('/search')) { searched.push(params.page); return { total_pages: 9, results: [] }; }
+    return movie;
+  }, undefined, { searchPages: 2, logoUrl: 'https://addon.example/logo.png' });
+  await addon.catalog('movie', 'search', { search: 'Film' });
+  assert.deepEqual(searched.sort(), [1, 2]);
+  assert.equal(addon.manifest().logo, 'https://addon.example/logo.png');
+});
+
+test('a slow setup upload does not hold a setup slot, and the setup rate limit can be disabled', async t => {
+  const { connect } = await import('node:net');
+  const server = createServer(createAddon(async () => []), { setupConcurrency: 1, setupRateLimit: 0 });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const { port } = server.address();
+  const slow = connect(port, '127.0.0.1');
+  slow.on('error', () => {});
+  slow.write('POST /api/configure HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const statuses = [];
+  for (let i = 0; i < 35; i++) {
+    statuses.push((await fetch(`http://127.0.0.1:${port}/api/configure`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"languages":[]}' })).status);
+  }
+  assert.deepEqual([...new Set(statuses)], [400]);
+  slow.destroy();
+});
