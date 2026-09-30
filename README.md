@@ -17,16 +17,36 @@ Create your account at <https://ko-fi.com> and complete its payout setup. Set `K
 
 The configuration page shows an optional support card below the installation section. Its button opens your Ko-fi profile in a new tab without sending the page URL, which may contain a private install configuration. Payments happen on Ko-fi; no payment credentials or third-party widget scripts are added to this app. Leave `KO_FI_URL` blank to hide the card. Only HTTPS Ko-fi profile URLs are accepted.
 
+## Operator settings
+
+All optional. Defaults match earlier releases except `REQUEST_TIMEOUT_MS`, which replaces Node's 300-second default; existing deployments need no changes.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TMDB_BASE_URL` | `https://api.themoviedb.org/3` | TMDB API base URL, for hosts that route TMDB through a caching or egress proxy. Credentials are still sent the same way. |
+| `TMDB_CONCURRENCY` | `4` | Upstream requests in flight per process, shared by all users. |
+| `TMDB_QUEUE_LIMIT` | `500` | Upstream requests allowed to wait before new ones get HTTP 503. |
+| `TMDB_CACHE_ENTRIES` | `1000` | Response cache size for the shared server credential. |
+| `TMDB_PERSONAL_CACHE_ENTRIES` | `100` | Response cache size for each personal credential. |
+| `PERSONAL_CLIENT_LIMIT` | `50` | Personal credentials kept in memory at once. |
+| `SEARCH_MAX_PAGES` | `5` | TMDB search pages (20 results each) checked per search, from 1 to 5. Each result costs a details request. |
+| `SETUP_RATE_LIMIT` | `30` | Setup and person-search attempts per minute per process; `0` disables it for hosts that rate-limit at the ingress. |
+| `SETUP_CONCURRENCY` | `4` | Setup and person-search attempts processed at once. A request takes a slot only after its body has arrived. |
+| `REQUEST_TIMEOUT_MS` | `30000` | Time allowed to receive a complete request before HTTP 408. |
+| `LOGO_URL` | Railway production logo | Absolute logo URL in the manifest; point it at `<your host>/logo.png`. |
+
+Invalid values stop the server at startup with a message naming the variable.
+
 ## Included
 
 - Indian productions (`with_origin_country=IN`) with original language Assamese, Bengali, Gujarati, Hindi, Kannada, Kashmiri, Malayalam, Marathi, Nepali, Odia, Punjabi, Sanskrit, Sindhi, Tamil, Telugu, or Urdu. The default combines these 16 languages. English and other foreign-language originals are excluded from discovery, search, and metadata.
 - Multiple original-language selection in a single installation, restricted to those 16 codes from TMDB's language list. Other Indian languages without their own supported TMDB code cannot be selected separately. Some options may have no Indian titles. Language selection does not indicate dubbed audio availability.
 - Popular, recently released, and highly rated shelves for both movies and series. Highly rated requires at least 50 TMDB votes. Hidden gems use the transparent rules below. Recently released series are ordered by their first air date, not their latest episode.
 - Twenty-item upstream pages, bounded to TMDB's 500-page discovery limit.
-- Search scans the first 100 upstream matches per media type, verifies Indian origin from title details, and filters the selected languages. Search is deliberately bounded and can miss lower-ranked matches.
+- Search scans the first 100 upstream matches per media type by default (`SEARCH_MAX_PAGES`), verifies Indian origin from title details, and filters the selected languages. Search is deliberately bounded and can miss lower-ranked matches.
 - TMDB posters, descriptions, cast, directors, and episode metadata. IMDb IDs are used where available for stream-add-on matching; otherwise a namespaced TMDB ID is used. Compatibility for fallback IDs depends on other add-ons.
 - Full season fetching, including specials. Episodes without known air dates are omitted because Stremio requires a release date. Long-running shows can take longer on a cold cache.
-- A bounded 15-minute in-memory cache, request deduplication, four concurrent upstream requests, timeouts, and safe error responses. Rate-limited requests are not automatically retried.
+- A bounded 15-minute in-memory cache, request deduplication, four concurrent upstream requests by default, timeouts, and safe error responses. Rate-limited requests are not automatically retried.
 
 This add-on does not supply streams. Completeness depends on TMDB's country, language, date, and episode records. TMDB ratings are used for sorting and are not mislabeled as IMDb ratings.
 

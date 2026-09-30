@@ -1,4 +1,5 @@
 import { ServiceError } from './tmdb.js';
+import { DEFAULT_LOGO_URL } from './settings.js';
 
 import { INDIAN_LANGUAGES, LANGUAGE_NAMES, DECADES, discoveryConfig } from './discovery.js';
 export { INDIAN_LANGUAGES, LANGUAGE_NAMES } from './discovery.js';
@@ -8,14 +9,14 @@ const image = (path, size = 'w500') => path ? `https://image.tmdb.org/t/p/${size
 const date = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? `${value}T00:00:00.000Z` : undefined;
 const indian = item => item.origin_country?.includes('IN') || item.production_countries?.some(c => c.iso_3166_1 === 'IN');
 
-export function createAddon(tmdb, today = () => new Date().toISOString().slice(0, 10)) {
+export function createAddon(tmdb, today = () => new Date().toISOString().slice(0, 10), { logoUrl = DEFAULT_LOGO_URL, searchPages = 5 } = {}) {
   function manifest(language = 'all') {
     const config = discoveryConfig(language);
     const key = config.languages.length === 16 ? 'all' : config.languages.join(',');
     const languageFilter = { name: 'genre', options: config.languages.map(l => LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(l)]) };
     return {
       id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.4.0',
-      logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
+      logo: logoUrl,
       name: `Indian Cinema${key === 'all' ? '' : ` (${key})`}`,
       description: 'Indian movies and series: popular, recent, highly rated, automatic hidden gems, decades and optional actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
       resources: ['catalog', { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'indiantmdb:'] }],
@@ -74,7 +75,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
       if (!query || skip) return { metas: [] };
       if (query.length > 200) throw new ServiceError('Search must be 200 characters or fewer.', 400);
       const first = await tmdb(`/search/${kinds[type]}`, { query, include_adult: false, page: 1, language: 'en-US' });
-      const pages = await Promise.all(Array.from({ length: Math.min(first.total_pages || 1, 5) - 1 }, (_, i) =>
+      const pages = await Promise.all(Array.from({ length: Math.min(first.total_pages || 1, searchPages) - 1 }, (_, i) =>
         tmdb(`/search/${kinds[type]}`, { query, include_adult: false, page: i + 2, language: 'en-US' })));
       rows = [first, ...pages].flatMap(p => (p.results || []).slice(0, 20));
     } else {
