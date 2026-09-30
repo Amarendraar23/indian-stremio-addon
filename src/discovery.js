@@ -12,10 +12,19 @@ export function discoveryConfig(value = 'all') {
   if (new Set(people.map(p => `${p.role}-${p.id}`)).size !== people.length) throw new ServiceError('Remove duplicate collections.', 400);
   return { languages, people: people.map(({ role, id, name }) => ({ role, id, name })) };
 }
-export function encodeDiscovery(value) { return Buffer.from(JSON.stringify(discoveryConfig(value))).toString('base64url'); }
-export function decodeDiscovery(value) {
+export function encodeDiscovery(value, signer) {
+  const payload = Buffer.from(JSON.stringify(discoveryConfig(value))).toString('base64url');
+  return signer ? `${payload}.${signer.sign(payload)}` : payload;
+}
+// Collection names are shown only when the signature proves this server resolved them; otherwise
+// (unsigned, edited, or signed under another key) the collection keeps working under its TMDB ID.
+export function decodeDiscovery(value, signer) {
+  let config, payload, signature;
   try {
-    if (!/^[A-Za-z0-9_-]{1,2800}$/.test(value)) throw new Error();
-    return discoveryConfig(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')));
+    [payload, signature] = value.split('.');
+    if (!/^[A-Za-z0-9_-]{1,2800}$/.test(payload) || value.split('.').length > 2) throw new Error();
+    config = discoveryConfig(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
   } catch { throw new ServiceError('Invalid discovery preferences. Configure the add-on again.', 400); }
+  if (signer?.verify(payload, signature)) return config;
+  return { ...config, people: config.people.map(p => ({ ...p, name: `TMDB person ${p.id}` })) };
 }

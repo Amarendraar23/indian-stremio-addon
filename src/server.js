@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createPreferenceSigner } from './config.js';
 import { readFileSync } from 'node:fs';
 const logo = readFileSync(new URL('./logo.png', import.meta.url));
 import { pathToFileURL } from 'node:url';
@@ -48,7 +49,7 @@ for(const [index,code] of codes.entries()){const label=document.createElement('l
 const boxes=[...language.querySelectorAll('input')], people=document.querySelector('#people');
 const pathParts=location.pathname.split('/').filter(Boolean), selected=pathParts.at(-2);
 if(codes.includes(selected))boxes.forEach(b=>b.checked=b.value===selected);
-if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
+if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1].split('.')[0];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
 document.querySelector('#all-languages').onclick=()=>{boxes.forEach(b=>b.checked=true);invalidate();};
 document.querySelector('#clear-languages').onclick=()=>{boxes.forEach(b=>b.checked=false);invalidate();};
 people.addEventListener('input',invalidate);
@@ -85,6 +86,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
   }
   const configurationPage = page(supportUrl);
   const codec = createConfigCodec(configSecret);
+  const signer = createPreferenceSigner(configSecret);
   const clients = new Map();
   const limited = createLimiter();
   let configurationWindow = 0, configurationCount = 0, configurationActive = 0;
@@ -121,7 +123,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       await scoped.languages();
       for (const person of preferences.people) person.name = await scoped.person(person.id);
       const legacy = data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
-      const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences)}`;
+      const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences, signer)}`;
       const path = `${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
       if (path.length > 3800) throw new ServiceError('Install link too long. Select fewer collections or use a TMDB API key.', 400);
       return { path };
@@ -154,7 +156,7 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       }
       let language = 'all';
       if (parts[0] === 'all' || /^[a-z]{2}$/.test(parts[0] || '')) language = parts.shift();
-      if (parts[0] === 'd') { parts.shift(); language = decodeDiscovery(parts.shift() || ''); }
+      if (parts[0] === 'd') { parts.shift(); language = decodeDiscovery(parts.shift() || '', signer); }
       if (!parts.length || (parts.length === 1 && parts[0] === 'configure')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(configurationPage); return;
       }
