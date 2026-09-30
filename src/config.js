@@ -8,6 +8,18 @@ export function credentialOptions(value) {
   return /^[a-f0-9]{32}$/i.test(value) ? { apiKey: value } : { token: value };
 }
 
+export function validateMdbKey(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) throw new ServiceError('Enter a valid MDBList API key.', 400);
+  return value;
+}
+
+function validateCredential(value) {
+  if (typeof value === 'string') return credentialOptions(value);
+  if (!value || value.version !== 2) throw new ServiceError('Invalid credentials.', 400);
+  if (value.tmdb) credentialOptions(value.tmdb);
+  validateMdbKey(value.mdblist);
+}
+
 // Stateless authenticated encryption: no database and no plaintext key in install URLs.
 // CONFIG_SECRET must stay unchanged across deployments and replicas.
 export function createConfigCodec(secret) {
@@ -20,22 +32,23 @@ export function createConfigCodec(secret) {
     enabled: Boolean(key),
     seal(credential) {
       requireKey();
-      credentialOptions(credential);
+      validateCredential(credential);
       const iv = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', key, iv);
-      const ciphertext = Buffer.concat([cipher.update(credential, 'utf8'), cipher.final()]);
+      const ciphertext = Buffer.concat([cipher.update(typeof credential === 'string' ? credential : JSON.stringify(credential), 'utf8'), cipher.final()]);
       return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString('base64url');
     },
     open(value) {
       requireKey();
       try {
-        if (!/^[A-Za-z0-9_-]{40,2800}$/.test(value)) throw new Error();
+        if (!/^[A-Za-z0-9_-]{40,3200}$/.test(value)) throw new Error();
         const data = Buffer.from(value, 'base64url');
         const decipher = createDecipheriv('aes-256-gcm', key, data.subarray(0, 12));
         decipher.setAuthTag(data.subarray(12, 28));
         const credential = Buffer.concat([decipher.update(data.subarray(28)), decipher.final()]).toString('utf8');
-        credentialOptions(credential);
-        return credential;
+        const parsed = credential.startsWith('{') ? JSON.parse(credential) : credential;
+        validateCredential(parsed);
+        return parsed;
       } catch { throw new ServiceError('This install link is invalid. Configure the add-on again.', 400); }
     }
   };

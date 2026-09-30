@@ -7,6 +7,7 @@ import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
 import { CATALOGUE_NAMES, discoveryConfig, encodeDiscovery, decodeDiscovery } from './discovery.js';
 import { createConfigCodec, credentialOptions } from './config.js';
+import { createMdbList, withMdbList } from './mdblist.js';
 
 const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Indian Cinema · Stremio</title><style>
@@ -18,10 +19,18 @@ input[type=checkbox]{width:auto;margin-right:10px}fieldset{border:1px solid #657
 footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</style>
 <main><div>STREMIO ADD-ON</div><h1>Indian stories.<br>Indian languages.</h1>
 <p>Discover Indian movies and series, with popular, recently released, and highly rated collections. Posters, title details, cast, and episodes come from TMDB.</p>
+<label for="source">Catalogue source</label><select id="source"><option value="tmdb">TMDB</option><option value="mdblist">MDBList + optional TMDB collections</option></select>
+<section id="mdb-settings" hidden><h2>MDBList saved lists</h2>
+<label for="mdb-key">Your MDBList API key</label><input id="mdb-key" type="password" maxlength="128" autocomplete="off" spellcheck="false">
+<p>Use your key from <a href="https://mdblist.com/preferences/" target="_blank" rel="noreferrer">MDBList preferences</a>. Edit list filters in MDBList. Choose Original when filtering languages there. Only Indian productions in your selected original languages will appear here, so counts can differ from MDBList.</p>
+<button id="load-mdb" type="button">Load my MDBList lists</button>
+<label for="mdb-id">Or add a list by numeric MDBList ID</label><input id="mdb-id" inputmode="numeric" maxlength="16" placeholder="List ID"><button id="add-mdb" type="button">Add list</button>
+<p id="mdb-status" role="status"></p><div id="mdb-available"></div>
+<p>Choose up to four lists. Movie and TV catalogue choices appear below. List order is preserved. Browsing checks up to 1,000 candidates per list and language selection; use focused lists for best results. MDBList refresh and API limits depend on your plan.</p></section>
 <fieldset id="language"><legend>Original languages · choose one or more</legend><button type="button" id="all-languages">Select all</button><button type="button" id="clear-languages">Clear selection</button><div id="language-options"></div></fieldset>
 <p>Includes Indian productions in the 16 Indian languages supported by this selector. English and other foreign-language originals are excluded. Choosing a language narrows the catalogue; it does not select dubbed audio.</p>
 <p>Hidden gems are automatic: released titles rated at least 7/10 with 20–500 TMDB votes, sorted by rating. Vote counts are a rough visibility measure, not editorial recommendations. Use “By year” or “By decade” in Stremio Discover and its Genre selector to choose a year or decade. Movies use release dates; series use their first-air dates. These catalogues use your selected languages. Other shelves use Genre for language.</p>
-<section id="catalogues" aria-labelledby="catalogues-title"><h2 id="catalogues-title">Choose your catalogues</h2>
+<section id="catalogues" aria-labelledby="catalogues-title"><h2 id="catalogues-title">Choose your catalogues</h2><p id="source-help">TMDB collections</p>
 <p>Uncheck collections you do not want in Stremio. Search controls this add-on's search results; By year and By decade appear in Discover. Actor/director collections are selected separately below.</p>
 <button type="button" id="all-catalogues">Select all catalogues</button> <button type="button" id="clear-catalogues">Clear catalogues</button>
 <fieldset id="movie-catalogues"><legend>Movies</legend></fieldset>
@@ -38,7 +47,7 @@ footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</st
 <label for="credential">Your TMDB API key or API Read Access Token</label>
 <input id="credential" type="password" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="Paste your TMDB credential">
 <p id="credential-help">Use your own TMDB credential. <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">Get it from TMDB API settings</a>.</p>
-<p>Your credential is sent to this add-on server and TMDB to fetch metadata. It is encrypted in your install link. Keep that link private: anyone with it can use your TMDB quota. Stremio and the hosting provider can see the link. The server keeps temporary in-memory caches; it does not log credentials or save them in a database. Revoke the credential at TMDB if the link is shared.</p>
+<p>Your TMDB credential is sent to this server and TMDB for metadata. If selected, your MDBList key is sent to this server and MDBList for list access. Credentials are encrypted in your install link. Keep that link private: anyone with it can use your provider quotas. Stremio and the hosting provider can see the link. The server keeps temporary in-memory caches; it does not log credentials or save them in a database. Revoke the affected keys at their providers if the link is shared. TMDB remains required in MDBList mode for title details, episodes, language checks and optional TMDB collections.</p>
 <button id="generate" disabled>Generate install link</button>
 <div id="result" hidden><a class="install" id="install">Install in Stremio</a>
 <label for="manifest">Or copy this manifest URL into Stremio</label><input id="manifest" readonly aria-label="Manifest URL"><button id="copy">Copy URL</button>
@@ -47,22 +56,57 @@ ${supportUrl ? `<section class="support" aria-labelledby="support-title"><h2 id=
 <p>If you find it useful, you can support hosting and development. Every contribution is optional.</p>
 <a class="support-link" href="${supportUrl}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">☕ Support this project on Ko-fi <span aria-hidden="true">↗</span><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"> (opens in a new tab)</span></a></section>` : ''}
 <footer><h2>Credits</h2><a href="https://www.themoviedb.org"><img width="110" alt="TMDB" src="https://www.themoviedb.org/assets/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg"></a>
-<p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p></footer></main>
+<p>This product uses the TMDB API but is not endorsed or certified by TMDB. Optional saved lists are provided by <a href="https://mdblist.com/">MDBList</a>.</p></footer></main>
 <script>
 const language=document.querySelector('#language'), field=document.querySelector('#manifest'), status=document.querySelector('#status'), credential=document.querySelector('#credential'), generate=document.querySelector('#generate'), result=document.querySelector('#result');
 const names=${JSON.stringify(LANGUAGE_NAMES)}, codes=${JSON.stringify(INDIAN_LANGUAGES)};
 for(const [index,code] of codes.entries()){const label=document.createElement('label'), input=document.createElement('input');input.type='checkbox';input.value=code;input.checked=true;label.append(input, names[index]);document.querySelector('#language-options').append(label);}
 const boxes=[...language.querySelectorAll('input')], people=document.querySelector('#people');
 const catalogueNames=${JSON.stringify(CATALOGUE_NAMES)}, catalogueBoxes=[];
-for(const type of ['movie','series'])for(const [id,name] of Object.entries(catalogueNames)){const label=document.createElement('label'), input=document.createElement('input');input.type='checkbox';input.value=type+':'+id;input.checked=true;label.append(input,name);document.querySelector('#'+type+'-catalogues').append(label);catalogueBoxes.push(input);}
+const source=document.querySelector('#source'), mdbKey=document.querySelector('#mdb-key'), mdbStatus=document.querySelector('#mdb-status');
+let selectedLists=[], availableLists=[], selectedCatalogues=new Set(['movie','series'].flatMap(t=>Object.keys(catalogueNames).map(id=>t+':'+id))), modeSelections={}, listRevision=0;
 const pathParts=location.pathname.split('/').filter(Boolean), selected=pathParts.at(-2);
 if(codes.includes(selected))boxes.forEach(b=>b.checked=b.value===selected);
-if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));catalogueBoxes.forEach(b=>b.checked=config.catalogues===undefined||config.catalogues.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
+if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));selectedCatalogues=new Set(config.catalogues===undefined?[...selectedCatalogues]:config.catalogues);people.value=(config.people||[]).map(p=>p.role+':'+p.id).join(', ');source.value=config.source||'tmdb';selectedLists=config.lists||[];availableLists=[...selectedLists];}catch{}}
+let currentSource=source.value;
+function rememberCatalogues(){selectedCatalogues=new Set(catalogueBoxes.filter(b=>b.checked).map(b=>b.value));}
+function renderCatalogues(){
+ catalogueBoxes.length=0;
+ for(const type of ['movie','series']){
+  const holder=document.querySelector('#'+type+'-catalogues');holder.replaceChildren();const legend=document.createElement('legend');legend.textContent=type==='movie'?'Movies':'TV shows';holder.append(legend);
+  const entries=[...(source.value==='mdblist'?selectedLists.filter(l=>l.types.includes(type)).map(l=>['mdb-'+l.id,'MDBList · '+l.name]):[]),...Object.entries(catalogueNames).map(([id,name])=>[id,(source.value==='mdblist'?'TMDB · ':'')+name])];
+  for(const [id,name] of entries){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=type+':'+id;input.checked=selectedCatalogues.has(input.value);label.append(input,name);holder.append(label);catalogueBoxes.push(input);}
+ }
+ document.querySelector('#mdb-settings').hidden=source.value!=='mdblist';
+ document.querySelector('#source-help').textContent=source.value==='mdblist'?'Your MDBList shelves are shown first. All TMDB collections remain available below as optional additions. Search, years, decades and actor/director collections use TMDB.':'TMDB collections';
+}
+function renderLists(){
+ const holder=document.querySelector('#mdb-available');holder.replaceChildren();
+ for(const list of availableLists){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=selectedLists.some(l=>l.id===list.id);label.append(input,list.name+' · '+list.id);holder.append(label);input.onchange=async()=>{
+  rememberCatalogues();if(input.checked){
+   const expected=listRevision;input.disabled=true;
+   try{const response=await fetch('/api/mdblist/lists',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mdblistKey:mdbKey.value.trim(),listId:list.id})});const data=await response.json();if(!response.ok)throw new Error(data.error);if(expected!==listRevision){input.checked=false;return;}const verified=data.lists[0];
+   if(selectedLists.length>=4){input.checked=false;mdbStatus.textContent='Choose up to four lists.';return;}rememberCatalogues();selectedLists.push(verified);for(const t of verified.types)selectedCatalogues.add(t+':mdb-'+list.id);
+   }catch(error){input.checked=false;mdbStatus.textContent=error.message;return;}finally{input.disabled=false;}
+  }else{selectedLists=selectedLists.filter(l=>l.id!==list.id);for(const t of ['movie','series'])selectedCatalogues.delete(t+':mdb-'+list.id);}renderCatalogues();invalidate();
+ };}
+}
+source.onchange=()=>{rememberCatalogues();modeSelections[currentSource]=new Set(selectedCatalogues);currentSource=source.value;selectedCatalogues=new Set(modeSelections[currentSource]||(currentSource==='mdblist'?selectedLists.flatMap(l=>l.types.map(t=>t+':mdb-'+l.id)):['movie','series'].flatMap(t=>Object.keys(catalogueNames).map(id=>t+':'+id))));renderCatalogues();invalidate();};
+mdbKey.oninput=()=>{listRevision++;invalidate();mdbStatus.textContent='Key changed. Load lists to check access.';};
+async function loadLists(manual){
+ const key=mdbKey.value.trim(), expected=++listRevision;mdbStatus.textContent='Loading lists…';
+ try{const body={mdblistKey:key};if(manual){const raw=document.querySelector('#mdb-id').value.trim();if(!/^[1-9][0-9]*$/.test(raw))throw new Error('Enter a numeric MDBList list ID.');body.listId=Number(raw);}
+ const response=await fetch('/api/mdblist/lists',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error);if(expected!==listRevision)return;
+ availableLists=[...new Map([...selectedLists,...(manual?availableLists:[]),...data.lists].map(l=>[l.id,l])).values()];renderLists();mdbStatus.textContent=data.lists.length?'Choose lists above, then choose their movie/TV catalogues below.':'No saved lists found. Create a list in MDBList or add one by ID.';
+ }catch(error){if(expected===listRevision)mdbStatus.textContent=error.message;}
+}
+document.querySelector('#load-mdb').onclick=()=>loadLists(false);document.querySelector('#add-mdb').onclick=()=>loadLists(true);
+renderCatalogues();renderLists();
 document.querySelector('#all-languages').onclick=()=>{boxes.forEach(b=>b.checked=true);invalidate();};
 document.querySelector('#clear-languages').onclick=()=>{boxes.forEach(b=>b.checked=false);invalidate();};
 document.querySelector('#all-catalogues').onclick=()=>{catalogueBoxes.forEach(b=>b.checked=true);invalidate();};
 document.querySelector('#clear-catalogues').onclick=()=>{catalogueBoxes.forEach(b=>b.checked=false);invalidate();};
-document.querySelector('#catalogues').addEventListener('change',invalidate);
+document.querySelector('#catalogues').addEventListener('change',()=>{rememberCatalogues();invalidate();});
 people.addEventListener('input',invalidate);
 let revision=0;
 const findPerson=document.querySelector('#find-person');
@@ -78,19 +122,19 @@ language.addEventListener('change',invalidate);credential.addEventListener('inpu
 fetch('/configuration.json').then(r=>r.json()).then(config=>{
  generate.disabled=!config.personalKeys&&!config.sharedCredential;findPerson.disabled=generate.disabled;
  if(config.sharedCredential)document.querySelector('#credential-help').append(' Leave blank to use the shared server credential.');
- if(!config.personalKeys){credential.disabled=true;status.textContent='Personal keys are not enabled on this host yet.';}
+ if(!config.personalKeys){credential.disabled=true;source.disabled=true;document.querySelector('#load-mdb').disabled=true;document.querySelector('#add-mdb').disabled=true;status.textContent='Personal keys are not enabled on this host yet.';}
 }).catch(()=>{status.textContent='Could not load configuration. Please reload.';});
 generate.addEventListener('click',async()=>{
  invalidate();const requestRevision=revision;generate.disabled=true;status.textContent='Checking configuration…';
- try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),languages:boxes.filter(b=>b.checked).map(b=>b.value),catalogues:catalogueBoxes.filter(b=>b.checked).map(b=>b.value),people:people.value.trim()?people.value.split(',').map(entry=>{const pair=entry.trim().split(':');if(pair.length!==2)throw new Error('Use role:person-ID pairs.');const [role,id]=pair;return {role,id:Number(id),name:'Pending'};}):[]})});const data=await response.json();if(!response.ok)throw new Error(data.error);
+ try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:source.value,lists:source.value==='mdblist'?selectedLists:[],mdblistKey:source.value==='mdblist'?mdbKey.value.trim():undefined,credential:credential.value.trim(),languages:boxes.filter(b=>b.checked).map(b=>b.value),catalogues:catalogueBoxes.filter(b=>b.checked).map(b=>b.value),people:people.value.trim()?people.value.split(',').map(entry=>{const pair=entry.trim().split(':');if(pair.length!==2)throw new Error('Use role:person-ID pairs.');const [role,id]=pair;return {role,id:Number(id),name:'Pending'};}):[]})});const data=await response.json();if(!response.ok)throw new Error(data.error);
  if(requestRevision!==revision){status.textContent='Settings changed. Generate a new link.';return;}
- field.value=location.origin+data.path;document.querySelector('#install').href=field.value.replace(/^https?:/,'stremio:');result.hidden=false;credential.value='';status.textContent='Ready to install. Keep your personal link private.';
+ field.value=location.origin+data.path;document.querySelector('#install').href=field.value.replace(/^https?:/,'stremio:');result.hidden=false;credential.value='';mdbKey.value='';listRevision++;status.textContent='Ready to install. Keep your personal link private.';
  }catch(error){status.textContent=error.message;}finally{generate.disabled=false;}
 });
 document.querySelector('#copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(field.value);status.textContent='Manifest URL copied.';}catch{field.select();status.textContent='Select and copy the URL above.';}});
 </script></html>`;
 
-export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, koFiUrl = '', analytics = null } = {}) {
+export function createServer(addon, { configSecret, sharedCredential = true, tmdbFactory = createTmdb, mdbFactory = createMdbList, koFiUrl = '', analytics = null } = {}) {
   const supportUrl = koFiUrl.trim();
   if (supportUrl && !/^https:\/\/ko-fi\.com\/[a-z0-9_\-]+\/?$/i.test(supportUrl)) {
     throw new Error('KO_FI_URL must be an HTTPS Ko-fi profile URL, for example https://ko-fi.com/yourname.');
@@ -101,15 +145,20 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
   const limited = createLimiter();
   let configurationWindow = 0, configurationCount = 0, configurationActive = 0;
   function personalAddon(credential) {
-    let client = clients.get(credential);
+    const key = typeof credential === 'string' ? credential : JSON.stringify(credential);
+    let client = clients.get(key);
     if (!client) {
       if (clients.size >= 50) clients.delete(clients.keys().next().value);
-      client = createAddon(tmdbFactory({ ...credentialOptions(credential), maxCacheEntries: 100, limited }));
-      clients.set(credential, client);
+      const tmdbCredential = typeof credential === 'string' ? credential : credential.tmdb;
+      if (!tmdbCredential && !sharedCredential) throw new ServiceError('Enter your TMDB credential for metadata.', 400);
+      client = tmdbCredential ? createAddon(tmdbFactory({ ...credentialOptions(tmdbCredential), maxCacheEntries: 100, limited })) : addon;
+      if (typeof credential !== 'string') client = withMdbList(client, mdbFactory({ apiKey: credential.mdblist, limited }));
+      clients.set(key, client);
     }
     return client;
   }
-  async function configure(req, personSearch = false) {
+  async function configure(req, action = 'configure') {
+    const personSearch = action === 'people';
     if (!req.headers['content-type']?.startsWith('application/json')) throw new ServiceError('Send JSON configuration.', 415);
     const minute = Math.floor(Date.now() / 60000);
     if (minute !== configurationWindow) { configurationWindow = minute; configurationCount = 0; }
@@ -124,15 +173,30 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       let data;
       try { data = JSON.parse(body); } catch { throw new ServiceError('Invalid configuration.', 400); }
       if (!data || typeof data !== 'object') throw new ServiceError('Invalid configuration.', 400);
+      if (action === 'lists') {
+        if (!codec.enabled) throw new ServiceError('Personal keys are not enabled on this host.', 503);
+        const mdb = mdbFactory({ apiKey: data.mdblistKey, limited });
+        return { lists: data.listId === undefined ? await mdb.lists() : [await mdb.info(data.listId)] };
+      }
       if (personSearch && (typeof data.personQuery !== 'string' || !data.personQuery.trim() || data.personQuery.length > 100)) throw new ServiceError('Enter a person name (up to 100 characters).', 400);
-      const preferences = discoveryConfig({ languages: data.languages ?? discoveryConfig(data.language || 'all').languages, people: data.people, catalogues: data.catalogues });
+      const preferences = discoveryConfig({ languages: data.languages ?? discoveryConfig(data.language || 'all').languages, people: data.people, catalogues: data.catalogues, source: data.source, lists: data.lists });
       const scoped = data.credential ? personalAddon(data.credential) : addon;
       if (!data.credential && !sharedCredential) throw new ServiceError('Enter your own TMDB API key or read-access token.', 400);
-      const encoded = data.credential ? codec.seal(data.credential) : null;
       if (personSearch) return { people: await scoped.searchPeople(data.personQuery.trim()) };
+      const encoded = preferences.source === 'mdblist' ? codec.seal({ version: 2, tmdb: data.credential || '', mdblist: data.mdblistKey }) : data.credential ? codec.seal(data.credential) : null;
       await scoped.languages();
+      if (preferences.source === 'mdblist') {
+        const mdb = mdbFactory({ apiKey: data.mdblistKey, limited });
+        // Validate even a metadata-only configuration's MDBList credential.
+        if (!preferences.lists.length) await mdb.lists();
+        for (const list of preferences.lists) {
+          const verified = await mdb.info(list.id);
+          if (list.types.some(t => !verified.types.includes(t))) throw new ServiceError('The selected MDBList media type is no longer available. Reload your lists.', 400);
+          list.name = verified.name;
+        }
+      }
       for (const person of preferences.people) person.name = await scoped.person(person.id);
-      const legacy = data.catalogues === undefined && data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
+      const legacy = !preferences.source && data.catalogues === undefined && data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
       const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences)}`;
       const path = `${analytics ? `/i/${analytics.issue()}` : ''}${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
       if (path.length > 3800) throw new ServiceError('Install link too long. Select fewer collections or use a TMDB API key.', 400);
@@ -165,7 +229,8 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
         json(200, analytics.snapshot());
         return;
       }
-      if (req.method === 'POST' && url.pathname === '/api/people') { json(200, await configure(req, true)); return; }
+      if (req.method === 'POST' && url.pathname === '/api/people') { json(200, await configure(req, 'people')); return; }
+      if (req.method === 'POST' && url.pathname === '/api/mdblist/lists') { json(200, await configure(req, 'lists')); return; }
       if (req.method === 'POST' && url.pathname === '/api/configure') { json(200, await configure(req)); return; }
       if (!['GET', 'HEAD'].includes(req.method)) { json(405, { error: 'Method not allowed.' }); return; }
       if (url.pathname === '/logo.png') {
@@ -190,9 +255,11 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(configurationPage); return;
       }
       if (personalConfig !== undefined) {
-        scopedAddon = personalAddon(codec.open(personalConfig));
-        configured = true;
+        const decoded = codec.open(personalConfig);
+        scopedAddon = personalAddon(decoded);
+        configured = language.source !== 'mdblist' || typeof decoded !== 'string';
       }
+      else if (language.source === 'mdblist') configured = false;
       if (parts.length === 1 && parts[0] === 'health') { json(200, { status: 'ok', note: 'Process health only; TMDB connectivity is not checked.' }); return; }
       if (parts.length === 1 && parts[0] === 'manifest.json') { json(200, { ...scopedAddon.manifest(language), behaviorHints: { configurable: true, configurationRequired: !configured } }); return; }
       if (parts.length === 1 && parts[0] === 'configuration.json') { json(200, { personalKeys: codec.enabled, sharedCredential }); return; }
