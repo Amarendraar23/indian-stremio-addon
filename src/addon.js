@@ -15,6 +15,10 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const languageFilter = { name: 'genre', options: config.languages.map(l => LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(l)]) };
     return {
       id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.4.0',
+      stremioAddonsConfig: {
+        issuer: 'https://stremio-addons.net',
+        signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..29Z7WuiwGRXCSH0gpRid2Q.m6xIX3W44s0wA1IYGi4_TszhIA9o6LziBjSu_CadgCcHXSZOyUQKqpyS8i57IXqvwYhSdaC2bbn_AximTC4YXYyz1-nZwbqbWE9Ko9UouROjkayZbplQGG9YjLRJrfb4.1jtRv2pgK4QVe8ceD6YHSA'
+      },
       logo: 'https://indian-stremio-addon-production.up.railway.app/logo.png',
       name: `Indian Cinema${key === 'all' ? '' : ` (${key})`}`,
       description: 'Indian movies and series: popular, recent, highly rated, automatic hidden gems, decades and optional actor/director movie collections. Metadata by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',
