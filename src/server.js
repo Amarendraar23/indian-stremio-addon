@@ -5,7 +5,7 @@ const logo = readFileSync(new URL('./logo.png', import.meta.url));
 import { pathToFileURL } from 'node:url';
 import { createTmdb, createLimiter, ServiceError } from './tmdb.js';
 import { createAddon, INDIAN_LANGUAGES, LANGUAGE_NAMES } from './addon.js';
-import { discoveryConfig, encodeDiscovery, decodeDiscovery } from './discovery.js';
+import { CATALOGUE_NAMES, discoveryConfig, encodeDiscovery, decodeDiscovery } from './discovery.js';
 import { createConfigCodec, credentialOptions } from './config.js';
 
 const page = supportUrl => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -21,6 +21,12 @@ footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</st
 <fieldset id="language"><legend>Original languages · choose one or more</legend><button type="button" id="all-languages">Select all</button><button type="button" id="clear-languages">Clear selection</button><div id="language-options"></div></fieldset>
 <p>Includes Indian productions in the 16 Indian languages supported by this selector. English and other foreign-language originals are excluded. Choosing a language narrows the catalogue; it does not select dubbed audio.</p>
 <p>Hidden gems are automatic: released titles rated at least 7/10 with 20–500 TMDB votes, sorted by rating. Vote counts are a rough visibility measure, not editorial recommendations. Use “By year” or “By decade” in Stremio Discover and its Genre selector to choose a year or decade. Movies use release dates; series use their first-air dates. These catalogues use your selected languages. Other shelves use Genre for language.</p>
+<section id="catalogues" aria-labelledby="catalogues-title"><h2 id="catalogues-title">Choose your catalogues</h2>
+<p>Uncheck collections you do not want in Stremio. Search controls this add-on's search results; By year and By decade appear in Discover. Actor/director collections are selected separately below.</p>
+<button type="button" id="all-catalogues">Select all catalogues</button> <button type="button" id="clear-catalogues">Clear catalogues</button>
+<fieldset id="movie-catalogues"><legend>Movies</legend></fieldset>
+<fieldset id="series-catalogues"><legend>TV shows</legend></fieldset>
+<p>You can turn off every catalogue and still use metadata. Generate and install a new link to apply changes.</p></section>
 <h2>Actor/director movie collections</h2>
 <label for="person-query">Find an actor or director by name</label>
 <input id="person-query" maxlength="100" placeholder="Search TMDB people" autocomplete="off">
@@ -47,11 +53,16 @@ const language=document.querySelector('#language'), field=document.querySelector
 const names=${JSON.stringify(LANGUAGE_NAMES)}, codes=${JSON.stringify(INDIAN_LANGUAGES)};
 for(const [index,code] of codes.entries()){const label=document.createElement('label'), input=document.createElement('input');input.type='checkbox';input.value=code;input.checked=true;label.append(input, names[index]);document.querySelector('#language-options').append(label);}
 const boxes=[...language.querySelectorAll('input')], people=document.querySelector('#people');
+const catalogueNames=${JSON.stringify(CATALOGUE_NAMES)}, catalogueBoxes=[];
+for(const type of ['movie','series'])for(const [id,name] of Object.entries(catalogueNames)){const label=document.createElement('label'), input=document.createElement('input');input.type='checkbox';input.value=type+':'+id;input.checked=true;label.append(input,name);document.querySelector('#'+type+'-catalogues').append(label);catalogueBoxes.push(input);}
 const pathParts=location.pathname.split('/').filter(Boolean), selected=pathParts.at(-2);
 if(codes.includes(selected))boxes.forEach(b=>b.checked=b.value===selected);
-if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
+if(pathParts.includes('d')){try{const encoded=pathParts[pathParts.indexOf('d')+1];const config=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));boxes.forEach(b=>b.checked=config.languages.includes(b.value));catalogueBoxes.forEach(b=>b.checked=config.catalogues===undefined||config.catalogues.includes(b.value));people.value=config.people.map(p=>p.role+':'+p.id).join(', ');}catch{}}
 document.querySelector('#all-languages').onclick=()=>{boxes.forEach(b=>b.checked=true);invalidate();};
 document.querySelector('#clear-languages').onclick=()=>{boxes.forEach(b=>b.checked=false);invalidate();};
+document.querySelector('#all-catalogues').onclick=()=>{catalogueBoxes.forEach(b=>b.checked=true);invalidate();};
+document.querySelector('#clear-catalogues').onclick=()=>{catalogueBoxes.forEach(b=>b.checked=false);invalidate();};
+document.querySelector('#catalogues').addEventListener('change',invalidate);
 people.addEventListener('input',invalidate);
 let revision=0;
 const findPerson=document.querySelector('#find-person');
@@ -71,7 +82,7 @@ fetch('/configuration.json').then(r=>r.json()).then(config=>{
 }).catch(()=>{status.textContent='Could not load configuration. Please reload.';});
 generate.addEventListener('click',async()=>{
  invalidate();const requestRevision=revision;generate.disabled=true;status.textContent='Checking configuration…';
- try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),languages:boxes.filter(b=>b.checked).map(b=>b.value),people:people.value.trim()?people.value.split(',').map(entry=>{const pair=entry.trim().split(':');if(pair.length!==2)throw new Error('Use role:person-ID pairs.');const [role,id]=pair;return {role,id:Number(id),name:'Pending'};}):[]})});const data=await response.json();if(!response.ok)throw new Error(data.error);
+ try{const response=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:credential.value.trim(),languages:boxes.filter(b=>b.checked).map(b=>b.value),catalogues:catalogueBoxes.filter(b=>b.checked).map(b=>b.value),people:people.value.trim()?people.value.split(',').map(entry=>{const pair=entry.trim().split(':');if(pair.length!==2)throw new Error('Use role:person-ID pairs.');const [role,id]=pair;return {role,id:Number(id),name:'Pending'};}):[]})});const data=await response.json();if(!response.ok)throw new Error(data.error);
  if(requestRevision!==revision){status.textContent='Settings changed. Generate a new link.';return;}
  field.value=location.origin+data.path;document.querySelector('#install').href=field.value.replace(/^https?:/,'stremio:');result.hidden=false;credential.value='';status.textContent='Ready to install. Keep your personal link private.';
  }catch(error){status.textContent=error.message;}finally{generate.disabled=false;}
@@ -114,14 +125,14 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
       try { data = JSON.parse(body); } catch { throw new ServiceError('Invalid configuration.', 400); }
       if (!data || typeof data !== 'object') throw new ServiceError('Invalid configuration.', 400);
       if (personSearch && (typeof data.personQuery !== 'string' || !data.personQuery.trim() || data.personQuery.length > 100)) throw new ServiceError('Enter a person name (up to 100 characters).', 400);
-      const preferences = discoveryConfig({ languages: data.languages ?? discoveryConfig(data.language || 'all').languages, people: data.people });
+      const preferences = discoveryConfig({ languages: data.languages ?? discoveryConfig(data.language || 'all').languages, people: data.people, catalogues: data.catalogues });
       const scoped = data.credential ? personalAddon(data.credential) : addon;
       if (!data.credential && !sharedCredential) throw new ServiceError('Enter your own TMDB API key or read-access token.', 400);
       const encoded = data.credential ? codec.seal(data.credential) : null;
       if (personSearch) return { people: await scoped.searchPeople(data.personQuery.trim()) };
       await scoped.languages();
       for (const person of preferences.people) person.name = await scoped.person(person.id);
-      const legacy = data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
+      const legacy = data.catalogues === undefined && data.languages === undefined && data.people === undefined && (data.language === undefined || data.language === 'all' || INDIAN_LANGUAGES.includes(data.language));
       const suffix = legacy ? (data.language || 'all') : `d/${encodeDiscovery(preferences)}`;
       const path = `${analytics ? `/i/${analytics.issue()}` : ''}${encoded ? `/c/${encoded}` : ''}/${suffix}/manifest.json`;
       if (path.length > 3800) throw new ServiceError('Install link too long. Select fewer collections or use a TMDB API key.', 400);

@@ -439,3 +439,48 @@ test('person search is bounded and excludes adult results', async () => {
   assert.ok(!results.some(p => p.id === 99));
   assert.equal(results[0].knownFor, 'Film');
 });
+
+ test('catalogue selections round-trip, preserve legacy defaults, and reject unknown values', async () => {
+  const { discoveryConfig, encodeDiscovery, decodeDiscovery, CATALOGUE_KEYS } = await import('../src/discovery.js');
+  assert.deepEqual(discoveryConfig('hi').catalogues, CATALOGUE_KEYS);
+  assert.deepEqual(decodeDiscovery(Buffer.from(JSON.stringify({ languages: ['hi'], people: [] })).toString('base64url')).catalogues, CATALOGUE_KEYS);
+  const config = discoveryConfig({ languages: ['hi'], catalogues: ['series:search', 'movie:recent', 'movie:recent'] });
+  assert.deepEqual(config.catalogues, ['movie:recent', 'series:search']);
+  assert.deepEqual(decodeDiscovery(encodeDiscovery(config)), config);
+  for (const catalogues of [null, 'movie:recent', ['movie:unknown'], ['tv:popular'], [null]]) {
+    assert.throws(() => discoveryConfig({ languages: ['hi'], catalogues }), { status: 400 });
+  }
+});
+
+test('selected manifests and routes exclude disabled catalogues without upstream requests', async () => {
+  let calls = 0;
+  const addon = createAddon(async path => { calls++; return path.startsWith('/discover') ? { results: [] } : movie; });
+  const config = { languages: ['hi'], catalogues: ['movie:recent'], people: [{ role: 'actor', id: 10, name: 'Person' }] };
+  assert.deepEqual(addon.manifest(config).catalogs.map(c => `${c.type}:${c.id}`), ['movie:recent', 'movie:actor-10']);
+  for (const [type, id] of [['movie', 'popular'], ['series', 'recent'], ['movie', 'search'], ['movie', 'decades'], ['movie', 'years']]) {
+    await assert.rejects(addon.catalog(type, id, {}, config), { status: 404 });
+  }
+  assert.equal(calls, 0);
+  assert.deepEqual((await addon.catalog('movie', 'recent', {}, config)).metas, []);
+  assert.equal(calls, 1);
+  assert.deepEqual(addon.manifest({ languages: ['hi'], catalogues: [] }).catalogs, []);
+  assert.equal((await addon.meta('movie', 'indiantmdb:movie:1')).meta.name, 'Indian Film');
+});
+
+test('HTTP configuration preserves individual catalogues for shared and personal install links', async t => {
+  const tmdb = async path => path === '/configuration/languages' ? [] : { results: [] };
+  const server = createServer(createAddon(tmdb), { configSecret: 's'.repeat(64), tmdbFactory: () => tmdb });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const credential of ['', 'a'.repeat(32)]) for (const catalogues of [['movie:recent'], []]) {
+    const response = await fetch(`${base}/api/configure`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential, language: 'hi', catalogues }) });
+    assert.equal(response.status, 200);
+    const { path } = await response.json();
+    assert.ok(path.includes('/d/'));
+    const manifest = await (await fetch(base + path)).json();
+    assert.deepEqual(manifest.catalogs.map(c => `${c.type}:${c.id}`), catalogues);
+    assert.equal((await fetch(base + path.replace('manifest.json', 'catalog/series/popular.json'))).status, 404);
+    assert.equal((await fetch(base + path.replace('manifest.json', 'configure'))).status, 200);
+  }
+});

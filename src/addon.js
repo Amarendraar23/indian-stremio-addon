@@ -1,9 +1,9 @@
 import { ServiceError } from './tmdb.js';
 
-import { INDIAN_LANGUAGES, LANGUAGE_NAMES, DECADES, discoveryConfig } from './discovery.js';
+import { INDIAN_LANGUAGES, LANGUAGE_NAMES, DECADES, CATALOGUE_NAMES, discoveryConfig } from './discovery.js';
 export { INDIAN_LANGUAGES, LANGUAGE_NAMES } from './discovery.js';
 const kinds = { movie: 'movie', series: 'tv' };
-const shelves = { popular: 'Popular', recent: 'Recently released', rated: 'Highly rated', gems: 'Hidden gems (TMDB votes)' };
+const shelves = Object.fromEntries(Object.entries(CATALOGUE_NAMES).filter(([id]) => !['decades', 'years', 'search'].includes(id)));
 const image = (path, size = 'w500') => path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined;
 const date = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? `${value}T00:00:00.000Z` : undefined;
 const indian = item => item.origin_country?.includes('IN') || item.production_countries?.some(c => c.iso_3166_1 === 'IN');
@@ -15,7 +15,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const languageFilter = { name: 'genre', options: config.languages.map(l => LANGUAGE_NAMES[INDIAN_LANGUAGES.indexOf(l)]) };
     const years = Array.from({ length: Number(today().slice(0, 4)) - 1910 + 1 }, (_, i) => String(Number(today().slice(0, 4)) - i));
     return {
-      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.5.0',
+      id: `community.indian.tmdb.${key.replaceAll(',', '.')}`, version: '0.5.1',
       stremioAddonsConfig: {
         issuer: 'https://stremio-addons.net',
         signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..29Z7WuiwGRXCSH0gpRid2Q.m6xIX3W44s0wA1IYGi4_TszhIA9o6LziBjSu_CadgCcHXSZOyUQKqpyS8i57IXqvwYhSdaC2bbn_AximTC4YXYyz1-nZwbqbWE9Ko9UouROjkayZbplQGG9YjLRJrfb4.1jtRv2pgK4QVe8ceD6YHSA'
@@ -35,7 +35,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
         { type, id: 'years', name: 'India · By year', pageSize: 20, extra: [{ name: 'genre', options: years, isRequired: true }, { name: 'skip' }] },
         ...(type === 'movie' ? config.people.map(p => ({ type, id: `${p.role}-${p.id}`, name: `India · ${p.role === 'actor' ? 'Starring' : 'Directed by'} ${p.name}`, pageSize: 20, extra: [languageFilter, { name: 'skip' }] })) : []),
         { type, id: 'search', name: 'India · Search', extra: [{ name: 'search', isRequired: true }, languageFilter] }
-      ])
+      ]).filter(c => config.catalogues.includes(`${c.type}:${c.id}`) || (c.type === 'movie' && config.people.some(p => `${p.role}-${p.id}` === c.id)))
     };
   }
   async function details(type, id) {
@@ -68,6 +68,7 @@ export function createAddon(tmdb, today = () => new Date().toISOString().slice(0
     const periodEnd = [year ? `${year}-12-31` : decade ? `${parseInt(decade) + 9}-12-31` : currentDate, currentDate].sort()[0];
     if (decade && !DECADES.includes(decade)) throw new ServiceError('Unsupported decade.', 400);
     if (!Object.hasOwn(kinds, type) || !(Object.hasOwn(shelves, id) || id === 'search' || id === 'decades' || id === 'years' || (type === 'movie' && person))) throw new ServiceError('Catalogue not found.', 404);
+    if (!person && !config.catalogues.includes(`${type}:${id}`)) throw new ServiceError('Catalogue not found.', 404);
     if ((id === 'decades' && !decade) || (id === 'years' && !year)) return { metas: [] };
     if (extra.genre && id !== 'decades' && id !== 'years') {
       const selected = INDIAN_LANGUAGES[LANGUAGE_NAMES.indexOf(extra.genre)];
