@@ -20,7 +20,7 @@ footer{margin-top:60px;font-size:14px}a{color:#eab56a}#status{color:#f4c388}</st
 <p>Discover Indian movies and series, with popular, recently released, and highly rated collections. Posters, title details, cast, and episodes come from TMDB.</p>
 <fieldset id="language"><legend>Original languages · choose one or more</legend><button type="button" id="all-languages">Select all</button><button type="button" id="clear-languages">Clear selection</button><div id="language-options"></div></fieldset>
 <p>Includes Indian productions in the 16 Indian languages supported by this selector. English and other foreign-language originals are excluded. Choosing a language narrows the catalogue; it does not select dubbed audio.</p>
-<p>Hidden gems are automatic: released titles rated at least 7/10 with 20–500 TMDB votes, sorted by rating. Vote counts are a rough visibility measure, not editorial recommendations. Use “By decade” in Stremio Discover and its Genre selector for decades. Other shelves use Genre for language.</p>
+<p>Hidden gems are automatic: released titles rated at least 7/10 with 20–500 TMDB votes, sorted by rating. Vote counts are a rough visibility measure, not editorial recommendations. Use “By year” or “By decade” in Stremio Discover and its Genre selector to choose a year or decade. Movies use release dates; series use their first-air dates. These catalogues use your selected languages. Other shelves use Genre for language.</p>
 <h2>Actor/director movie collections</h2>
 <label for="person-query">Find an actor or director by name</label>
 <input id="person-query" maxlength="100" placeholder="Search TMDB people" autocomplete="off">
