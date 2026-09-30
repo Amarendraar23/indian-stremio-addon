@@ -146,13 +146,12 @@ export function createServer(addon, { configSecret, sharedCredential = true, tmd
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-Robots-Tag', 'noindex, nofollow');
         if (!analytics) { json(404, { error: 'Not found.' }); return; }
+        if (req.method !== 'GET') { json(405, { error: 'Method not allowed.' }); return; }
+        if (url.pathname === '/admin/analytics') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(dashboard); return; }
         if (!analytics.authorized(req.headers.authorization)) {
-          res.setHeader('WWW-Authenticate', 'Basic realm="Indian Cinema admin", charset="UTF-8"');
           json(401, { error: 'Authentication required.' }); return;
         }
-        if (req.method !== 'GET') { json(405, { error: 'Method not allowed.' }); return; }
-        if (url.pathname.endsWith('.json')) json(200, analytics.snapshot());
-        else { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(dashboard); }
+        json(200, analytics.snapshot());
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/people') { json(200, await configure(req, true)); return; }

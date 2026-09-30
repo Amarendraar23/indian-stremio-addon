@@ -66,9 +66,11 @@ test('HTTP activity excludes setup/manifest/HEAD, includes data outcomes, protec
   assert.deepEqual(store.snapshot().totals,{success:4,errors:1,unidentified:1});
   assert.equal(store.snapshot().activeInstallations[1],1);
   for(const endpoint of ['/admin/analytics','/admin/analytics.json']){
-    const denied = await fetch(base+endpoint); assert.equal(denied.status,401);
+    const denied = await fetch(base+endpoint); assert.equal(denied.status,endpoint.endsWith('.json') ? 401 : 200);
+    assert.equal(denied.headers.get('www-authenticate'),null);
+    if (!endpoint.endsWith('.json')) assert.match(await denied.text(), /type="password"/);
     assert.equal(denied.headers.get('access-control-allow-origin'),null);
-    assert.equal((await fetch(base+endpoint,{headers:{Authorization:'Bearer wrong'}})).status,401);
+    assert.equal((await fetch(base+endpoint,{headers:{Authorization:'Bearer wrong'}})).status,endpoint.endsWith('.json') ? 401 : 200);
     const response = await fetch(base+endpoint,{headers:auth}); assert.equal(response.status,200);
     assert.equal(response.headers.get('cache-control'),'no-store');
     assert.equal(response.headers.get('x-frame-options'),'DENY');

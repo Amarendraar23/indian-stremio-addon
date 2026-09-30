@@ -27,7 +27,7 @@ test('container entrypoint starts a writable store and serves as a non-root user
     });
     assert.match(output, new RegExp(`Server runtime UID: ${root ? 1000 : process.getuid?.() ?? 'unavailable'}`));
     assert.equal((await fetch('http://127.0.0.1:17843/health')).status, 200);
-    assert.equal((await fetch('http://127.0.0.1:17843/admin/analytics')).status, 401);
+    assert.equal((await fetch('http://127.0.0.1:17843/admin/analytics.json')).status, 401);
     assert.equal(statSync(database).mode & 0o777, 0o600);
     if (root) assert.equal(statSync(database).uid, 1000);
   } finally {
