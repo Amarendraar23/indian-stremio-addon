@@ -3,7 +3,7 @@ import { ServiceError } from './tmdb.js';
 export const INDIAN_LANGUAGES = ['as', 'bn', 'gu', 'hi', 'kn', 'ks', 'ml', 'mr', 'ne', 'or', 'pa', 'sa', 'sd', 'ta', 'te', 'ur'];
 export const LANGUAGE_NAMES = ['Assamese', 'Bengali', 'Gujarati', 'Hindi', 'Kannada', 'Kashmiri', 'Malayalam', 'Marathi', 'Nepali', 'Odia', 'Punjabi', 'Sanskrit', 'Sindhi', 'Tamil', 'Telugu', 'Urdu'];
 export const DECADES = Array.from({ length: Math.floor(new Date().getUTCFullYear() / 10) - 191 + 1 }, (_, i) => `${1910 + i * 10}s`).reverse();
-export const CATALOGUE_NAMES = { popular: 'Popular', recent: 'Recently released', rated: 'Highly rated', gems: 'Hidden gems (TMDB votes)', decades: 'By decade', years: 'By year', search: 'Search' };
+export const CATALOGUE_NAMES = { popular: 'Popular', recent: 'Recently released', upcoming: 'Coming soon / Upcoming', rated: 'Highly rated', gems: 'Hidden gems (TMDB votes)', decades: 'By decade', years: 'By year', search: 'Search' };
 export const CATALOGUE_KEYS = ['movie', 'series'].flatMap(type => Object.keys(CATALOGUE_NAMES).map(id => `${type}:${id}`));
 export function discoveryConfig(value = 'all') {
   const input = typeof value === 'string' ? { languages: value === 'all' ? INDIAN_LANGUAGES : value.split(',') } : value;

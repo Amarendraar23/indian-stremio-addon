@@ -109,7 +109,7 @@ test('HTTP manifest, CORS, configuration, encoded search, and errors', async t =
   const manifest = await fetch(`${base}/all/manifest.json`);
   assert.equal(manifest.headers.get('access-control-allow-origin'), '*');
   const body = await manifest.json();
-  assert.equal(body.catalogs.length, 14);
+  assert.equal(body.catalogs.length, 16);
   assert.deepEqual(body.types, ['movie', 'series']);
   assert.ok((await (await fetch(`${base}/configure`)).text()).includes('Indian languages'));
   await fetch(`${base}/ta/catalog/movie/search/search=A%26B.json`);
@@ -482,5 +482,60 @@ test('HTTP configuration preserves individual catalogues for shared and personal
     assert.deepEqual(manifest.catalogs.map(c => `${c.type}:${c.id}`), catalogues);
     assert.equal((await fetch(base + path.replace('manifest.json', 'catalog/series/popular.json'))).status, 404);
     assert.equal((await fetch(base + path.replace('manifest.json', 'configure'))).status, 200);
+  }
+});
+
+test('future shelves enforce UTC date boundaries, country and languages for movies and series', async () => {
+  for (const type of ['movie', 'series']) {
+    const dateKey = type === 'movie' ? 'release_date' : 'first_air_date';
+    const queryKey = type === 'movie' ? 'primary_release_date' : 'first_air_date';
+    const dates = ['2026-12-30', '2026-12-31', '2027-01-01', '2027-03-31', '2027-04-01', '', null, 'unknown'];
+    const items = dates.map((value, i) => ({ ...movie, id: i + 1, imdb_id: `tt${100 + i}`, release_date: undefined, [dateKey]: value, vote_count: 0 }));
+    items.push({ ...items[2], id: 20, adult: true }, { ...items[2], id: 21, original_language: 'ta' }, { ...items[2], id: 22, origin_country: ['US'], production_countries: [] });
+    const calls = [];
+    const addon = createAddon(async (path, params) => {
+      calls.push({ path, params });
+      return path.startsWith('/discover/') ? { results: items.map(({ id }) => ({ id })) } : items.find(item => item.id === Number(path.split('/').pop()));
+    }, () => '2026-12-31');
+    for (const id of ['upcoming']) {
+      calls.length = 0;
+      const result = await addon.catalog(type, id, { genre: 'Hindi', skip: '20' }, { languages: ['hi', 'ta'] });
+      assert.deepEqual(result.metas.map(item => item.id), ['tt102', 'tt103', 'tt104']);
+      assert.equal(calls[0].path, type === 'movie' ? '/discover/movie' : '/discover/tv');
+      assert.equal(calls[0].params[`${queryKey}.gte`], '2027-01-01');
+      assert.equal(calls[0].params[`${queryKey}.lte`], undefined);
+      assert.equal(calls[0].params.sort_by, `${queryKey}.asc`);
+      assert.equal(calls[0].params.page, 2);
+      assert.equal(calls[0].params.with_original_language, 'hi');
+      assert.equal(calls[0].params['vote_count.gte'], undefined);
+      assert.ok(result.metas.every(item => item.released && item.language === 'hi'));
+    }
+    const before = calls.length;
+    assert.deepEqual((await addon.catalog(type, 'upcoming', { skip: '10000' })).metas, []);
+    assert.equal(calls.length, before);
+    await assert.rejects(addon.catalog(type, 'upcoming', {}, { languages: ['hi'], catalogues: [] }), { status: 404 });
+  }
+});
+
+test('future shelves are selectable and survive configuration and HTTP routes', async t => {
+  const { encodeDiscovery, decodeDiscovery } = await import('../src/discovery.js');
+  const catalogues = ['movie:upcoming', 'series:upcoming'];
+  const encoded = encodeDiscovery({ languages: ['hi'], catalogues });
+  assert.deepEqual(decodeDiscovery(encoded).catalogues, catalogues);
+  const addon = createAddon(async path => path.startsWith('/discover/') ? { results: [{ id: 1 }] } : { ...movie, release_date: '2027-01-01', first_air_date: '2027-01-01' }, () => '2026-12-31');
+  const server = createServer(addon);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const setup = await (await fetch(`${base}/configure`)).text();
+  assert.ok(setup.includes('Coming soon / Upcoming'));
+  assert.ok(setup.includes('Upcoming'));
+  const manifest = await (await fetch(`${base}/d/${encoded}/manifest.json`)).json();
+  assert.deepEqual(manifest.catalogs.map(c => `${c.type}:${c.id}`), catalogues);
+  for (const prefix of ['/hi', `/d/${encoded}`]) for (const key of catalogues) {
+    const response = await fetch(`${base}${prefix}/catalog/${key.replace(':', '/')}.json`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).metas.length, 1);
   }
 });
