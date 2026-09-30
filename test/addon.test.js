@@ -153,7 +153,9 @@ test('encrypted configuration survives restarts and rejects tampering and a chan
   const encoded = codec.seal(credential);
   assert.equal(encoded.includes(credential), false);
   assert.equal(createConfigCodec('s'.repeat(64)).open(encoded), credential);
-  assert.throws(() => codec.open('X' + encoded.slice(1)), { status: 400 });
+  const tampered = Buffer.from(encoded, 'base64url');
+  tampered[0] ^= 1; // Always change the IV, even when the random first character is X.
+  assert.throws(() => codec.open(tampered.toString('base64url')), { status: 400 });
   assert.throws(() => createConfigCodec('t'.repeat(64)).open(encoded), { status: 400 });
   assert.throws(() => createConfigCodec().seal(credential), { status: 503 });
 });
